@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pixel Warfare Engine v2.1 (Complete)</title>
+    <title>Pixel Warfare Engine v2.8 (Flatland Spawns)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Courier New', Courier, monospace; color: #eee; user-select: none; }
         canvas { display: block; image-rendering: pixelated; }
@@ -20,7 +20,6 @@
         .bp-item { border: 1px solid #444; padding: 10px; text-align: center; cursor: pointer; transition: background 0.2s; }
         .bp-item:hover { background: #333; border-color: #fff; }
         
-        /* New Styles for Disabled State */
         .bp-item.disabled { opacity: 0.4; cursor: not-allowed; border-color: #444; }
         .bp-item.disabled:hover { background: transparent; border-color: #444; }
 
@@ -39,7 +38,7 @@
             <div>Seed: <span id="seed-disp"></span></div>
         </div>
         <div class="stat-box">
-            <small>WASD: Move | Click: Build | R-Click: Break</small>
+            <small>WASD: Move | Click: Build | R-Click: Break/Harvest</small>
             <div id="active-bp-display" style="color: #ffd700; font-size: 12px; display:none; margin-top:5px;">
                 Active: <span id="current-bp-name"></span>
             </div>
@@ -59,13 +58,14 @@ const CONFIG = {
     TILE_SIZE: 32,
     PLAYER_SPEED_BASE: 4,
     PLAYER_SPEED_ROAD: 8,
-    NPC_SPAWN_RATE: 0.005,
+    NPC_SPAWN_RATE: 0.002, // REDUCED FROM 0.005
     BUILD_RANGE: 400,
     MAX_NPCS: 30
 };
 
 const TILES = {
     WATER: { id: 0, color: '#2b2b96', solid: true, name: 'Ocean', short: 'H2O' },
+    DEEP_WATER: { id: 18, color: '#1a1a6e', solid: true, name: 'Deep Ocean', short: 'D.H2O' },
     GRASS: { id: 1, color: '#2d6e32', solid: false, name: 'Grass', short: 'Grs' },
     SAND:  { id: 2, color: '#c2b280', solid: false, name: 'Sand', short: 'Snd' },
     GREY:  { id: 3, color: '#777777', solid: false, name: 'Stone/Road', short: 'Stn' },
@@ -74,13 +74,16 @@ const TILES = {
     GOLD:  { id: 7, color: '#ffd700', solid: false, name: 'Gold', short: 'Gld' },
     WALL:  { id: 9, color: '#555555', solid: true, name: 'Wall', short: 'Wal' },
     WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
-    STONE_BLOCK: { id: 11, color: '#777777', solid: false, name: 'Stone Block', short: 'StB' }, 
+    STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Boulder', short: 'Bld' }, 
     TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St' },
     TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir' },
     TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd' },
     ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' },
     WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal' },
-    WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral' }
+    WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral' },
+    TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
+    MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt' },
+    GREENS: { id: 21, color: '#32CD32', solid: false, name: 'Greens', short: 'Grn' }
 };
 
 const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
@@ -111,13 +114,57 @@ class Utils {
         const s = Utils.hash(Math.floor(x), Math.floor(y), seed);
         return (s & 0xFFFFFFFF) / 0xFFFFFFFF; 
     }
+    
+    static hsl(h, s, l, x, y, seed, hVar, lVar) {
+        const r1 = Utils.noise(x, y, seed); 
+        const r2 = Utils.noise(x, y, seed + 100); 
+        const newH = h + (r1 * hVar * 2) - hVar;
+        const newL = l + (r2 * lVar * 2) - lVar;
+        return `hsl(${newH}, ${s}%, ${newL}%)`;
+    }
+    
+    static getElevation(x, y, seed) {
+        const scale1 = 0.03;
+        const scale2 = 0.01;
+        let n = Math.sin(x * scale1 + seed) + Math.cos(y * scale1 + seed * 0.5) 
+              + Math.sin((x + y) * scale2 - seed) * 0.5;
+        n = n / 2.0; 
+        n += (Utils.noise(x, y, seed) - 0.5) * 0.1;
+        return n;
+    }
+
     static getBiome(x, y, seed) {
-        const scale = 0.05;
-        const n = Math.sin(x * scale + seed) + Math.cos(y * scale + seed) * 0.5 + (Utils.noise(x, y, seed) * 0.2);
-        if (n < -0.2) return TILES.WATER.id;
-        if (n < -0.1) return TILES.SAND.id;
+        const n = Utils.getElevation(x, y, seed);
+
+        if (n < -0.5) return TILES.DEEP_WATER.id;
+        if (n < -0.1) return TILES.WATER.id;
+        if (n < 0.0) return TILES.SAND.id; 
+        
+        if (n > 0.85) return TILES.MOUNTAIN.id; 
+        
+        if (n > 0.35) {
+            const tNoise = Utils.noise(x, y, seed + 999);
+            if (tNoise < 0.35) {
+                const rockChance = Utils.noise(x, y, seed + 444);
+                if (rockChance < 0.02) return TILES.STONE_BLOCK.id;
+                return TILES.TREE.id;
+            }
+            return TILES.GRASS.id; 
+        }
+        
+        const scattered = Utils.noise(x, y, seed + 888);
+        if (scattered < 0.02) {
+             const rockChance = Utils.noise(x, y, seed + 555);
+             if (rockChance < 0.05) return TILES.STONE_BLOCK.id;
+             return TILES.TREE.id;
+        }
+
+        const rockNoise = Utils.noise(x, y, seed + 333);
+        if (rockNoise < 0.001) return TILES.STONE_BLOCK.id;
+
         return TILES.GRASS.id;
     }
+    
     static distance(e1, e2) { return Math.sqrt((e1.x - e2.x)**2 + (e1.y - e2.y)**2); }
 }
 
@@ -172,11 +219,27 @@ class World {
     constructor(seed) {
         this.seed = seed || Math.floor(Math.random() * 10000);
         this.modifiedTiles = {}; 
+        this.tileData = {}; 
     }
     getKey(x, y) { return `${x},${y}`; }
     getTile(x, y) { return this.modifiedTiles[this.getKey(x, y)] !== undefined ? this.modifiedTiles[this.getKey(x, y)] : Utils.getBiome(x, y, this.seed); }
-    setTile(x, y, id) { this.modifiedTiles[this.getKey(x, y)] = id; }
+    setTile(x, y, id) { 
+        const key = this.getKey(x, y);
+        this.modifiedTiles[key] = id;
+        if (this.tileData[key]) delete this.tileData[key]; 
+    }
     isSolid(x, y) { return ID_TO_TILE[this.getTile(x, y)].solid; }
+
+    hitTile(x, y, dmg) {
+        const key = this.getKey(x, y);
+        if (!this.tileData[key]) this.tileData[key] = { dmg: 0 };
+        this.tileData[key].dmg += dmg;
+        return this.tileData[key].dmg;
+    }
+    getTileDamage(x, y) {
+        const key = this.getKey(x, y);
+        return this.tileData[key] ? this.tileData[key].dmg : 0;
+    }
 }
 
 class Entity {
@@ -185,12 +248,12 @@ class Entity {
         this.speed = CONFIG.PLAYER_SPEED_BASE;
         this.hp = 100;
         this.damageBuffer = 0;
-        this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20 };
+        this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0 };
         this.selectedTile = TILES.GREY.id;
     }
     
     move(dx, dy, world) {
-        const half = (CONFIG.TILE_SIZE / 2) - 4; // Hitbox reduction
+        const half = (CONFIG.TILE_SIZE / 2) - 4; 
         const check = (tx, ty) => {
             if (world.isSolid(Math.floor((tx - half)/CONFIG.TILE_SIZE), Math.floor((ty - half)/CONFIG.TILE_SIZE))) return false;
             if (world.isSolid(Math.floor((tx + half)/CONFIG.TILE_SIZE), Math.floor((ty - half)/CONFIG.TILE_SIZE))) return false;
@@ -235,7 +298,6 @@ class Game {
         this.godMode = false;
         this.activeBlueprint = null;
         
-        // Cache DOM elements
         this.dom = {
             hp: document.getElementById('hp'),
             coords: document.getElementById('coords'),
@@ -253,7 +315,7 @@ class Game {
             if (e.key.toLowerCase() === 'g') {
                 this.godMode = !this.godMode;
                 this.showMessage(this.godMode ? "GOD MODE ON" : "GOD MODE OFF");
-                this.updateUI(); // Refresh UI to update availability
+                this.updateUI(); 
             }
         });
 
@@ -271,7 +333,7 @@ class Game {
 
     initUI() {
         this.dom.invBar.innerHTML = ''; 
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD];
+        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS];
         usable.forEach((t) => {
             const slot = document.createElement('div');
             slot.className = 'slot';
@@ -288,22 +350,15 @@ class Game {
         BLUEPRINTS.forEach((bp, index) => {
             const div = document.createElement('div');
             div.className = 'bp-item';
-            
-            // Build cost string
             let costStr = "Free";
             if (bp.cost) {
                 costStr = Object.entries(bp.cost)
                     .map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`)
                     .join(', ');
             }
-            
             div.innerHTML = `<div class="bp-name">${bp.name}</div><div class="bp-req">${costStr}</div>`;
-            // Tooltip removed as per request
-            
             div.onclick = () => { 
-                // Check affordability before selecting
                 if (div.classList.contains('disabled')) return;
-                
                 this.activeBlueprint = bp; 
                 toggleBlueprints(); 
                 this.updateUI(); 
@@ -315,15 +370,14 @@ class Game {
 
     updateUI() {
         const slots = document.querySelectorAll('.slot');
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD];
+        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS];
         slots.forEach((s, i) => {
             const id = usable[i].id;
             s.classList.toggle('active', !this.activeBlueprint && id === this.player.selectedTile);
             const qtyEl = document.getElementById(`qty-${id}`);
-            if(qtyEl) qtyEl.innerText = this.player.inventory[id];
+            if(qtyEl) qtyEl.innerText = this.player.inventory[id] || 0;
         });
 
-        // Update Blueprint Menu Availability
         const bpItems = this.dom.bpMenu.children;
         BLUEPRINTS.forEach((bp, i) => {
             const div = bpItems[i];
@@ -336,12 +390,8 @@ class Game {
                     }
                 }
             }
-            
-            if (canAfford) {
-                div.classList.remove('disabled');
-            } else {
-                div.classList.add('disabled');
-            }
+            if (canAfford) div.classList.remove('disabled');
+            else div.classList.add('disabled');
         });
 
         if(this.activeBlueprint) {
@@ -353,21 +403,20 @@ class Game {
     }
 
     findSafeSpawn() {
-        // Increased attempts and fallback scan
         for (let r = 0; r < 500; r++) {
             const x = (Math.random() - 0.5) * 2000;
             const y = (Math.random() - 0.5) * 2000;
             const gx = Math.floor(x/CONFIG.TILE_SIZE);
             const gy = Math.floor(y/CONFIG.TILE_SIZE);
-            if (this.world.getTile(gx, gy) !== TILES.WATER.id) return {x, y};
+            const t = this.world.getTile(gx, gy);
+            if (!ID_TO_TILE[t].solid) return {x, y};
         }
-        
-        // If random fails, spiral out from 0,0 until land is found
         let r = 0;
         while (r < 100) {
             for (let x = -r; x <= r; x++) {
                 for (let y = -r; y <= r; y++) {
-                    if (this.world.getTile(x, y) !== TILES.WATER.id) {
+                    const t = this.world.getTile(x, y);
+                    if (!ID_TO_TILE[t].solid) {
                         return {x: x*CONFIG.TILE_SIZE, y: y*CONFIG.TILE_SIZE};
                     }
                 }
@@ -390,6 +439,8 @@ class Game {
         if (Utils.distance(this.player, {x: mx, y: my}) > CONFIG.BUILD_RANGE) return;
 
         if (this.input.mouse.clickedLeft) {
+            if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return;
+
             const cannon = this.cannons.find(c => {
                 const [cx, cy] = c.key.split(',').map(Number);
                 return gx === cx && gy === cy;
@@ -410,16 +461,15 @@ class Game {
             if (this.activeBlueprint) {
                 const costMap = this.activeBlueprint.cost || {};
                 
-                // --- SPECIAL CHECKS ---
                 if (this.activeBlueprint.special === 'bridge') {
-                    // Smart Bridge Check: Must target Water or existing Rail
                     const targetId = this.world.getTile(gx, gy);
-                    if (targetId !== TILES.WATER.id && targetId !== TILES.WOOD_RAIL.id) {
+                    if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id && targetId !== TILES.WOOD_RAIL.id) {
                          this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00");
                          return;
                     }
                 } else if (this.activeBlueprint.requiresWater) {
-                    if (this.world.getTile(gx, gy) !== TILES.WATER.id) {
+                    const targetId = this.world.getTile(gx, gy);
+                    if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id) {
                          this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00");
                          return;
                     }
@@ -432,12 +482,9 @@ class Game {
 
                 if (affordable) {
                     let built = false;
-                    
-                    // Identify if this is a Bridge Blueprint
                     const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
 
                     this.activeBlueprint.structure.forEach(part => {
-                        // Allow overwriting Rails if we are building a bridge
                         const overwriteRail = this.activeBlueprint.special === 'bridge';
                         if (this.tryBuild(gx + part.x, gy + part.y, part.id, overwriteRail, isBridgeBp)) built = true;
                     });
@@ -445,20 +492,19 @@ class Game {
                     if (built) {
                         for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
                         
-                        // Smart Bridge Logic: Auto-place rails on water neighbors
                         if (this.activeBlueprint.special === 'bridge') {
                             const neighbors = [
                                 {x:gx+1, y:gy}, {x:gx-1, y:gy},
                                 {x:gx, y:gy+1}, {x:gx, y:gy-1}
                             ];
                             neighbors.forEach(n => {
-                                if (this.world.getTile(n.x, n.y) === TILES.WATER.id) {
+                                const nid = this.world.getTile(n.x, n.y);
+                                if (nid === TILES.WATER.id || nid === TILES.DEEP_WATER.id) {
                                     this.world.setTile(n.x, n.y, TILES.WOOD_RAIL.id);
                                     this.spawnParticles(n.x * CONFIG.TILE_SIZE + 16, n.y * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 4);
                                 }
                             });
                         }
-
                         this.updateUI();
                         this.recalcCannons();
                     }
@@ -466,7 +512,6 @@ class Game {
             } else {
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
-                    // Single tile placement is never a bridge operation
                     if (this.tryBuild(gx, gy, id, false, false)) {
                         consume(id, 1);
                         this.updateUI();
@@ -482,13 +527,12 @@ class Game {
                 let tx = gx, ty = gy;
                 let tileId = this.world.getTile(gx, gy);
                 
-                // RULE 2: Wood elements cannot be destroyed individually
                 if (tileId === TILES.WOOD_RAIL.id) {
                      this.spawnText(mx * this.zoom, my * this.zoom, "BREAK ROAD TO DEMOLISH", "#f00");
                      return;
                 }
-
-                if (!ID_TO_TILE[tileId].solid) {
+                
+                if (!ID_TO_TILE[tileId].solid && tileId !== TILES.TREE.id) {
                     let below = this.world.getTile(gx, gy + 1);
                     if ([12,14,15].includes(below)) { ty = gy + 1; tileId = below; }
                     else {
@@ -497,13 +541,50 @@ class Game {
                     }
                 }
 
-                if (tileId !== TILES.GRASS.id && tileId !== TILES.WATER.id && tileId !== TILES.SAND.id) {
-                    
-                    // RULE 1: Bridge cannot be removed if occupied
-                    // We must calculate ALL tiles that will be removed (The road + dependent rails)
-                    const tilesToRemove = [{x: tx, y: ty}];
+                if (tileId !== TILES.GRASS.id && tileId !== TILES.WATER.id && tileId !== TILES.DEEP_WATER.id && tileId !== TILES.SAND.id) {
+                    if (tileId === TILES.TREE.id) {
+                        this.world.setTile(tx, ty, TILES.GRASS.id);
+                        this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
+                        
+                        // Dropping Wood (Guaranteed)
+                        this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
+                        
+                        // Rare chance for Greens (10%) instead of guaranteed
+                        if (Math.random() < 0.1) {
+                            this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
+                        }
+                        
+                        this.updateUI();
+                        return;
+                    }
 
-                    // Check for dependent rails that will collapse
+                    // --- HARVEST STONE MECHANIC ---
+                    if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
+                        const dmg = 20; 
+                        const totalDmg = this.world.hitTile(tx, ty, dmg);
+                        const maxHp = 100;
+                        
+                        this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 3);
+                        this.spawnText(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE, `-${dmg}`, '#fff');
+
+                        if (totalDmg >= maxHp) {
+                            const biome = Utils.getBiome(tx, ty, this.world.seed);
+                            this.world.setTile(tx, ty, TILES.GRASS.id); 
+                            this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
+                            
+                            let stoneQty = 3;
+                            if (Math.random() < 0.1) {
+                                this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
+                            }
+                            if (Math.random() < 0.01) {
+                                this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
+                            }
+                            this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: stoneQty, bob: Math.random()*100});
+                        }
+                        return; 
+                    }
+
+                    const tilesToRemove = [{x: tx, y: ty}];
                     if (tileId === TILES.GREY.id) {
                         const neighbors = [
                             {x:tx+1, y:ty}, {x:tx-1, y:ty},
@@ -511,7 +592,6 @@ class Game {
                         ];
                         neighbors.forEach(n => {
                             if (this.world.getTile(n.x, n.y) === TILES.WOOD_RAIL.id) {
-                                // Check if this rail has ANY OTHER grey neighbors besides the one we are breaking
                                 const railNeighbors = [
                                     {x:n.x+1, y:n.y}, {x:n.x-1, y:n.y},
                                     {x:n.x, y:n.y+1}, {x:n.x, y:n.y-1}
@@ -519,20 +599,14 @@ class Game {
                                 const support = railNeighbors.some(rn => 
                                     (rn.x !== tx || rn.y !== ty) && this.world.getTile(rn.x, rn.y) === TILES.GREY.id
                                 );
-                                if (!support) {
-                                    tilesToRemove.push({x: n.x, y: n.y});
-                                }
+                                if (!support) tilesToRemove.push({x: n.x, y: n.y});
                             }
                         });
                     }
 
-                    // Check Intersection against ALL entities
                     const allEntities = [this.player, ...this.npcs];
                     const isOccupied = tilesToRemove.some(t => {
-                        const tileCenter = {
-                            x: t.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, 
-                            y: t.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2
-                        };
+                        const tileCenter = { x: t.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: t.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
                         return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
                     });
 
@@ -541,11 +615,11 @@ class Game {
                         return;
                     }
 
-                    // --- PROCEED WITH DESTRUCTION ---
-
-                    // Restore Water if the biome was originally water
                     const biome = Utils.getBiome(tx, ty, this.world.seed);
-                    const restoreId = (biome === TILES.WATER.id) ? TILES.WATER.id : TILES.GRASS.id;
+                    let restoreId = TILES.GRASS.id;
+                    if (biome === TILES.WATER.id) restoreId = TILES.WATER.id;
+                    if (biome === TILES.DEEP_WATER.id) restoreId = TILES.DEEP_WATER.id;
+                    if (biome === TILES.SAND.id) restoreId = TILES.SAND.id;
 
                     this.world.setTile(tx, ty, restoreId);
                     
@@ -559,17 +633,14 @@ class Game {
                     }
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 5);
                     
-                    // Collapse dependent rails (We already calculated them, but need to act now)
                     tilesToRemove.forEach(t => {
-                        // Skip the main tile we just broke
                         if (t.x === tx && t.y === ty) return;
-                        
-                        // Collapse Rail
-                        this.world.setTile(t.x, t.y, TILES.WATER.id);
+                        const rBiome = Utils.getBiome(t.x, t.y, this.world.seed);
+                        const rRestore = (rBiome === TILES.WATER.id || rBiome === TILES.DEEP_WATER.id) ? rBiome : TILES.GRASS.id;
+                        this.world.setTile(t.x, t.y, rRestore);
                         this.spawnParticles(t.x * CONFIG.TILE_SIZE + 16, t.y * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 4);
                         if (!this.godMode) this.player.inventory[TILES.WOOD.id] += 1;
                     });
-
                     this.recalcCannons();
                     this.updateUI();
                 }
@@ -589,16 +660,14 @@ class Game {
         const current = this.world.getTile(gx, gy);
         if (current === id) return false;
         
-        // STRICT RULE: Cannot build on Water unless it is part of a Bridge Blueprint
-        if (current === TILES.WATER.id && !isBridge) return false;
+        if ((current === TILES.WATER.id || current === TILES.DEEP_WATER.id) && !isBridge) return false;
         
-        // Special case: Allow overwriting rails if building a bridge/road
         if (allowRailOverwrite && current === TILES.WOOD_RAIL.id) {
             this.world.setTile(gx, gy, id);
             return true;
         }
 
-        if (ID_TO_TILE[current].solid && current !== TILES.WATER.id) return false;
+        if (ID_TO_TILE[current].solid && current !== TILES.WATER.id && current !== TILES.DEEP_WATER.id) return false;
         
         this.world.setTile(gx, gy, id);
         return true;
@@ -609,7 +678,6 @@ class Game {
         const px = Math.floor(this.player.x / CONFIG.TILE_SIZE);
         const py = Math.floor(this.player.y / CONFIG.TILE_SIZE);
         const newCannons = [];
-        
         for (let y = py - range; y < py + range; y++) {
             for (let x = px - range; x < px + range; x++) {
                 const id = this.world.getTile(x, y);
@@ -639,10 +707,10 @@ class Game {
 
     update(dt) {
         if (this.input.wheel !== 0) {
-            this.zoom = Math.max(0.5, Math.min(this.zoom - this.input.wheel * 0.001, 3));
+            // FIX: Adjusted zoom out to 0.1 (5x more than original 0.5) instead of extreme 0.01
+            this.zoom = Math.max(0.1, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
 
-        // Regen
         this.regenTimer += dt;
         if (this.regenTimer > 2000 && this.player.hp < 100) {
             this.player.hp = Math.min(100, this.player.hp + 5);
@@ -668,18 +736,20 @@ class Game {
 
         this.handleInteraction();
 
-        // NPCs
         if (this.npcs.length < CONFIG.MAX_NPCS && Math.random() < CONFIG.NPC_SPAWN_RATE) {
             const ang = Math.random() * 6.28;
             const dist = 600;
             const nx = this.player.x + Math.cos(ang)*dist;
             const ny = this.player.y + Math.sin(ang)*dist;
             
-            // Validate spawn location is NOT water
             const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
             const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
+            const tile = this.world.getTile(ngx, ngy);
             
-            if (this.world.getTile(ngx, ngy) !== TILES.WATER.id) {
+            // NEW CHECK: Only spawn if elevation < 0.35 (Plains/Beach)
+            const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
+
+            if (elevation < 0.35 && tile !== TILES.WATER.id && tile !== TILES.DEEP_WATER.id && !ID_TO_TILE[tile].solid) {
                 this.npcs.push(new Entity(nx, ny, 'npc'));
             }
         }
@@ -688,10 +758,9 @@ class Game {
             const ang = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
             npc.move(Math.cos(ang)*2, Math.sin(ang)*2, this.world);
             
-            // Collision Player (With Damage Buffer)
             if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
                 if (!this.godMode) {
-                    this.player.damageBuffer += 0.5; // Accumulate damage
+                    this.player.damageBuffer += 0.5; 
                     if (this.player.damageBuffer >= 1) {
                         const dmg = Math.floor(this.player.damageBuffer);
                         this.player.hp -= dmg;
@@ -699,9 +768,8 @@ class Game {
                         if (Math.random() > 0.8) this.spawnParticles(this.player.x, this.player.y, '#f00', 2);
                     }
                 }
-                // Knockback
                 if (dx||dy) {
-                    npc.x += dx * 20; npc.y += dy * 20;
+                    npc.move(dx * 20, dy * 20, this.world); 
                     npc.hp -= 20;
                     this.spawnParticles(npc.x, npc.y, '#f00', 5);
                     this.spawnText(npc.x, npc.y, "20", "#fff");
@@ -709,7 +777,6 @@ class Game {
             }
         });
         
-        // Cannons Fire
         this.cannons.forEach(c => {
             if (c.cooldown > 0) c.cooldown--;
             else if (c.ammo > 0) {
@@ -723,11 +790,9 @@ class Game {
             }
         });
 
-        // Projectiles
         this.projectiles.forEach(p => {
             const ang = Math.atan2(p.ty - p.y, p.tx - p.x);
             p.x += Math.cos(ang) * 12; p.y += Math.sin(ang) * 12;
-            
             this.npcs.forEach(n => {
                 if (Utils.distance(p, n) < 16) {
                     p.active = false;
@@ -739,23 +804,15 @@ class Game {
             if (Utils.distance(p, {x:p.tx, y:p.ty}) < 10) p.active = false;
         });
 
-        // Cleanup
         this.npcs = this.npcs.filter(n => {
             if (n.hp <= 0) {
-                // Weighted Drop Logic
                 const roll = Math.random();
                 let dropId = TILES.GREY.id;
                 let qty = 5;
-
-                if (roll < 0.10) { 
-                    dropId = TILES.GOLD.id; qty = 2; // 10% Chance: Gold (Rare)
-                } else if (roll < 0.40) { 
-                    dropId = TILES.WOOD.id; qty = 5; // 30% Chance: Wood
-                } else if (roll < 0.70) { 
-                    dropId = TILES.IRON.id; qty = 5; // 30% Chance: Iron
-                } else { 
-                    dropId = TILES.GREY.id; qty = 8; // 30% Chance: Stone
-                }
+                if (roll < 0.10) { dropId = TILES.GOLD.id; qty = 2; } 
+                else if (roll < 0.40) { dropId = TILES.WOOD.id; qty = 5; } 
+                else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
+                else { dropId = TILES.GREY.id; qty = 8; }
 
                 this.loot.push({x: n.x, y: n.y, id: dropId, qty: qty, bob: Math.random()*100});
                 this.spawnParticles(n.x, n.y, '#f00', 10);
@@ -765,14 +822,10 @@ class Game {
         });
         this.projectiles = this.projectiles.filter(p => p.active);
         
-        // Update particles & texts
         this.particles.forEach(p => p.update());
         this.particles = this.particles.filter(p => p.life > 0);
-        
         this.texts.forEach(t => { t.y += t.dy; t.life--; });
         this.texts = this.texts.filter(t => t.life > 0);
-
-        // Loot
         this.loot = this.loot.filter(l => {
             if (Utils.distance(this.player, l) < 32) {
                 this.player.inventory[l.id] = (this.player.inventory[l.id]||0) + l.qty;
@@ -811,7 +864,6 @@ class Game {
         const startRow = Math.floor(this.camera.y / CONFIG.TILE_SIZE);
         const endRow = startRow + (this.canvas.height / this.zoom / CONFIG.TILE_SIZE) + 1;
 
-        // 1. Bucket Entities & Loot by Row for Z-Sorting
         const rowBuckets = {};
         const addToBucket = (obj, type) => {
             const r = Math.floor(obj.y / CONFIG.TILE_SIZE);
@@ -823,53 +875,180 @@ class Game {
         addToBucket(this.player, 'player');
         this.loot.forEach(l => addToBucket(l, 'loot'));
 
-        // 2. PASS 1: GROUND (Draws flat tiles first to prevent clipping)
+        // PASS 1: GROUND
         for (let r = startRow - 2; r <= endRow; r++) {
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.world.getTile(c, r);
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
 
-                // Draw ONLY if it is a flat tile (Not solid, or is Water)
-                if (!tile.solid || id === TILES.WATER.id) {
+                if ((!tile.solid || id === TILES.WATER.id || id === TILES.DEEP_WATER.id) && id !== TILES.TREE.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
+                
+                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id) {
+                     const tx = c * CONFIG.TILE_SIZE;
+                     const ty = r * CONFIG.TILE_SIZE;
+                     this.ctx.fillStyle = TILES.GRASS.color; 
+                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                }
             }
         }
 
-        // 3. PASS 2: OBJECTS (Walls, Towers, Entities) - Sorted by Row
+        // PASS 2: OBJECTS
         for (let r = startRow - 2; r <= endRow; r++) { 
-            // A. Draw Static Structures for this Row
+            // A. Static Structures
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.world.getTile(c, r);
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
                 
-                // Skip if it was already drawn in Ground pass (unless it's a structure)
-                if (!tile.solid || id === TILES.WATER.id) continue;
-
                 const tx = c * CONFIG.TILE_SIZE;
                 const ty = r * CONFIG.TILE_SIZE;
 
-                // Draw Base Block
-                this.ctx.fillStyle = tile.color;
-                this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                // FIX: Exclude STONE_BLOCK from generic rendering
+                if (tile.solid && 
+                    id !== TILES.WATER.id && 
+                    id !== TILES.DEEP_WATER.id && 
+                    id !== TILES.TREE.id && 
+                    id !== TILES.MOUNTAIN.id && 
+                    id !== TILES.STONE_BLOCK.id && 
+                    ![12, 14, 15].includes(id)) 
+                {
+                    this.ctx.fillStyle = tile.color;
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    // Shadows
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
+                    this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
+                    this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, 4); 
+                    this.ctx.fillRect(tx, ty, 4, CONFIG.TILE_SIZE); 
+                    // Borders
+                    this.ctx.lineWidth = 1;
+                    this.ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                    this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                }
                 
-                // Detailed Shadows
-                this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
-                this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
-                this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, 4); 
-                this.ctx.fillRect(tx, ty, 4, CONFIG.TILE_SIZE); 
+                // --- NEW BOULDER RENDERING ---
+                if (id === TILES.STONE_BLOCK.id) {
+                    // NEW: Draw Grass Background for Boulder
+                    this.ctx.fillStyle = TILES.GRASS.color;
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
 
-                // Borders
-                this.ctx.lineWidth = 1;
-                this.ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    const shapeR = Utils.noise(c, r, this.world.seed + 777);
+                    // Varied Stone Color
+                    this.ctx.fillStyle = Utils.hsl(0, 0, 55, c, r, this.world.seed, 0, 10);
+
+                    if (shapeR < 0.33) {
+                        // Shape 1: Roundish Boulder
+                        this.ctx.fillRect(tx + 4, ty + 4, 24, 24);
+                        this.ctx.fillRect(tx + 2, ty + 8, 4, 16); // Left bulge
+                        this.ctx.fillRect(tx + 26, ty + 8, 4, 16); // Right bulge
+                        this.ctx.fillRect(tx + 8, ty + 2, 16, 4); // Top bulge
+                        this.ctx.fillRect(tx + 8, ty + 26, 16, 4); // Bottom bulge
+                        
+                        // Highlight
+                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                        this.ctx.fillRect(tx + 8, ty + 6, 8, 4);
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                        this.ctx.fillRect(tx + 8, ty + 22, 16, 6);
+                    } else if (shapeR < 0.66) {
+                        // Shape 2: Heavy Slab / Flat Rock
+                        this.ctx.fillRect(tx + 2, ty + 12, 28, 18);
+                        this.ctx.fillRect(tx + 6, ty + 8, 20, 4);
+                        
+                        // Highlight
+                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                        this.ctx.fillRect(tx + 6, ty + 8, 20, 2);
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                        this.ctx.fillRect(tx + 22, ty + 12, 8, 18);
+                    } else {
+                        // Shape 3: Rock Cluster
+                        this.ctx.fillRect(tx + 2, ty + 14, 12, 14); // Small left
+                        this.ctx.fillRect(tx + 12, ty + 6, 18, 22); // Big right
+                        
+                        // Highlight
+                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                        this.ctx.fillRect(tx + 14, ty + 6, 10, 4);
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                        this.ctx.fillRect(tx + 8, ty + 20, 6, 8);
+                    }
+                }
+
+                // Harvest Health Bar for Stone/Mountain
+                if (id === TILES.MOUNTAIN.id || id === TILES.STONE_BLOCK.id) {
+                    const dmg = this.world.getTileDamage(c, r);
+                    if (dmg > 0) {
+                        const max = 100;
+                        const w = 24;
+                        const h = 4;
+                        const bx = tx + 4;
+                        const by = ty - 10;
+                        this.ctx.fillStyle = '#300';
+                        this.ctx.fillRect(bx, by, w, h);
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.fillRect(bx, by, w * ((max - dmg) / max), h);
+                    }
+                }
+
+                if (id === TILES.MOUNTAIN.id) {
+                    // Varied GREY
+                    this.ctx.fillStyle = Utils.hsl(0, 0, 60, c, r, this.world.seed, 0, 15);
+                    this.ctx.fillRect(tx, ty - 8, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE + 8); 
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty - 8, 4, CONFIG.TILE_SIZE + 8);
+                    this.ctx.fillStyle = '#eee'; 
+                    this.ctx.fillRect(tx + 4, ty - 8, CONFIG.TILE_SIZE - 8, 8);
+                }
+
+                if (id === TILES.TREE.id) {
+                    let isOccluding = false;
+                    for (let checkR = r - 2; checkR < r; checkR++) {
+                        if (rowBuckets[checkR] && rowBuckets[checkR].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) isOccluding = true;
+                    }
+                    this.ctx.globalAlpha = isOccluding ? 0.4 : 1.0;
+                    
+                    // Trunk varied
+                    this.ctx.fillStyle = Utils.hsl(25, 57, 23, c, r, this.world.seed + 100, 5, 5);
+                    this.ctx.fillRect(tx + 12, ty - 8, 8, 24); 
+                    
+                    // Leaves varied color
+                    this.ctx.fillStyle = Utils.hsl(120, 61, 34, c, r, this.world.seed, 15, 10);
+                    
+                    // Randomized Tree Shape
+                    const shapeR = Utils.noise(c, r, this.world.seed + 555);
+                    
+                    if (shapeR < 0.33) {
+                        // Shape 1: Classic Boxy
+                        this.ctx.fillRect(tx, ty - 24, 32, 24);
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+                        this.ctx.fillRect(tx + 4, ty - 20, 24, 16);
+                    } else if (shapeR < 0.66) {
+                        // Shape 2: Tall / Pine-like
+                        this.ctx.fillRect(tx + 2, ty - 16, 28, 16); // Bottom Tier
+                        this.ctx.fillRect(tx + 6, ty - 30, 20, 14); // Top Tier
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+                        this.ctx.fillRect(tx + 8, ty - 26, 16, 22);
+                    } else {
+                        // Shape 3: Wide / Bushy
+                        this.ctx.fillRect(tx - 2, ty - 20, 36, 20); // Main Body (Wider)
+                        this.ctx.fillRect(tx + 6, ty - 26, 20, 6); // Top Cap
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+                        this.ctx.fillRect(tx + 4, ty - 16, 24, 12);
+                    }
+
+                    this.ctx.globalAlpha = 1.0;
+                }
 
                 // Draw TALL STRUCTURES (Decorations)
                 if ([12, 14, 15].includes(id)) {
@@ -882,6 +1061,20 @@ class Game {
                     }
 
                     this.ctx.globalAlpha = isOccluding ? 0.4 : 1.0;
+
+                    // Draw the Base Block (which was skipped above)
+                    this.ctx.fillStyle = tile.color;
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    
+                    // Restore Depth Shadows for Tower Base
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
+                    this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
+                    this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, 4); 
+                    this.ctx.fillRect(tx, ty, 4, CONFIG.TILE_SIZE); 
+
+                    this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
 
                     // Barrel
                     this.ctx.fillStyle = (id===14 ? '#444' : id===15 ? '#ffd700' : '#777');
@@ -898,19 +1091,17 @@ class Game {
                     this.ctx.fill();
                     this.ctx.stroke();
 
-                    // Ammo
                     const cannon = this.cannons.find(can => can.key === `${c},${r}`);
                     if (cannon) {
                         this.ctx.fillStyle = cannon.ammo > 0 ? '#0ff' : '#f00';
                         this.ctx.font = '10px monospace';
                         this.ctx.fillText(cannon.ammo, tx + 10, ty + 20);
                     }
-                    
                     this.ctx.globalAlpha = 1.0;
                 }
             }
 
-            // B. Draw Entities & Loot for this Row
+            // B. Entities & Loot
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'loot') {
@@ -918,7 +1109,6 @@ class Game {
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else {
-                        // Player/NPC
                         this.ctx.fillStyle = obj._type === 'player' ? '#ff0000' : '#aa0000';
                         this.ctx.fillRect(obj.x - 16, obj.y - 16, 32, 32);
                         this.drawHealth(obj._orig); 
@@ -927,7 +1117,6 @@ class Game {
             }
         }
 
-        // Projectiles (Always on top)
         this.ctx.fillStyle = '#fff';
         this.projectiles.forEach(p => {
             this.ctx.beginPath();
@@ -937,7 +1126,6 @@ class Game {
 
         this.particles.forEach(p => p.draw(this.ctx, 0, 0)); 
 
-        // Ghost Blueprint
         if (this.activeBlueprint) {
             const mx = (this.input.mouse.x / this.zoom) + this.camera.x;
             const my = (this.input.mouse.y / this.zoom) + this.camera.y;
@@ -958,7 +1146,6 @@ class Game {
             this.ctx.stroke();
         }
         
-        // Damage Text
         this.ctx.font = "bold 14px monospace";
         this.texts.forEach(t => {
             this.ctx.fillStyle = t.col;
