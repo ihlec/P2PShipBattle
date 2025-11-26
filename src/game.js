@@ -16,6 +16,11 @@ export default class Game {
         this.world = new World();
         this.player = new Entity(0, 0, 'player');
         
+        // --- MODIFIED: ADD ANIMATION STATE TRACKING ---
+        this.player.isMoving = false;
+        this.player.moveTime = 0;
+        // ----------------------------------------------
+        
         // --- MOVED SPAWN LOGIC HERE ---
         const spawn = this.findSafeSpawn();
         this.player.x = spawn.x; this.player.y = spawn.y;
@@ -190,6 +195,13 @@ export default class Game {
 
         if (Utils.distance(this.player, {x: mx, y: my}) > CONFIG.BUILD_RANGE) return;
 
+        // Helper function to check if a grid tile is occupied by an entity
+        const isOccupied = (tx, ty) => {
+            const tileCenter = { x: tx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: ty * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
+            const allEntities = [this.player, ...this.npcs];
+            return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
+        };
+
         if (this.input.mouse.clickedLeft) {
             if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return;
 
@@ -212,30 +224,50 @@ export default class Game {
 
             if (this.activeBlueprint) {
                 const costMap = this.activeBlueprint.cost || {};
-                
-                if (this.activeBlueprint.special === 'bridge') {
-                    const targetId = this.world.getTile(gx, gy);
-                    if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id && targetId !== TILES.WOOD_RAIL.id) {
-                         this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00");
-                         return;
+                let affordable = true;
+
+                for (let [id, qty] of Object.entries(costMap)) {
+                    if (!canAfford(id, qty)) {
+                        affordable = false;
+                        break;
                     }
-                } else if (this.activeBlueprint.requiresWater) {
-                    const targetId = this.world.getTile(gx, gy);
-                    if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id) {
-                         this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00");
-                         return;
+                }
+                
+                // --- OCCUPANCY CHECK FOR BLUEPRINT ---
+                let occupied = false;
+                if (affordable) {
+                    for (const part of this.activeBlueprint.structure) {
+                        if (isOccupied(gx + part.x, gy + part.y)) {
+                            occupied = true;
+                            break;
+                        }
                     }
                 }
 
-                let affordable = true;
-                for (let [id, qty] of Object.entries(costMap)) {
-                    if (!canAfford(id, qty)) affordable = false;
+                if (occupied) {
+                    this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BUILD: OCCUPIED", "#f00");
+                    return;
                 }
+                // ------------------------------------
 
                 if (affordable) {
-                    let built = false;
                     const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
 
+                    if (this.activeBlueprint.special === 'bridge') {
+                        const targetId = this.world.getTile(gx, gy);
+                        if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id && targetId !== TILES.WOOD_RAIL.id) {
+                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00");
+                             return;
+                        }
+                    } else if (this.activeBlueprint.requiresWater) {
+                        const targetId = this.world.getTile(gx, gy);
+                        if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id) {
+                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00");
+                             return;
+                        }
+                    }
+                    
+                    let built = false;
                     this.activeBlueprint.structure.forEach(part => {
                         const overwriteRail = this.activeBlueprint.special === 'bridge';
                         if (this.tryBuild(gx + part.x, gy + part.y, part.id, overwriteRail, isBridgeBp)) built = true;
@@ -259,6 +291,13 @@ export default class Game {
                     }
                 }
             } else {
+                // --- OCCUPANCY CHECK FOR SINGLE TILE ---
+                if (isOccupied(gx, gy)) {
+                    this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BUILD: OCCUPIED", "#f00");
+                    return;
+                }
+                // ---------------------------------------
+                
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
                     if (this.tryBuild(gx, gy, id, false, false)) {
@@ -335,13 +374,9 @@ export default class Game {
                         });
                     }
 
-                    const allEntities = [this.player, ...this.npcs];
-                    const isOccupied = tilesToRemove.some(t => {
-                        const tileCenter = { x: t.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: t.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
-                        return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
-                    });
+                    const isOccupiedOnBreak = tilesToRemove.some(t => isOccupied(t.x, t.y)); // Reuse isOccupied logic
 
-                    if (isOccupied) {
+                    if (isOccupiedOnBreak) {
                         this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BREAK: OCCUPIED", "#f00");
                         return;
                     }
@@ -380,13 +415,7 @@ export default class Game {
     }
 
     tryBuild(gx, gy, id, allowRailOverwrite = false, isBridge = false) {
-        const tx = gx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2;
-        const ty = gy * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2;
-        
-        const allEntities = [...this.npcs, this.player];
-        for (let e of allEntities) {
-            if (Utils.distance({x:tx, y:ty}, e) < CONFIG.TILE_SIZE/1.5) return false;
-        }
+        // NOTE: The entity occupancy check is now handled in handleInteraction before calling tryBuild.
         
         const current = this.world.getTile(gx, gy);
         if (current === id) return false;
@@ -438,7 +467,7 @@ export default class Game {
 
     update(dt) {
         if (this.input.wheel !== 0) {
-            this.zoom = Math.max(0.05, Math.min(this.zoom - this.input.wheel * 0.001, 3));
+            this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
 
         this.regenTimer += dt;
@@ -455,11 +484,16 @@ export default class Game {
         if(this.input.keys['d'] || this.input.keys['arrowright']) dx = 1;
         
         if (dx || dy) {
+            // --- MODIFIED: TRACK MOVEMENT STATE AND TIME ---
+            this.player.isMoving = true; 
+            this.player.moveTime += dt;  
+            // ----------------------------------------------
             const len = Math.sqrt(dx*dx + dy*dy);
             this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
         } else {
-             // FIX: If no movement keys are pressed, move(0,0) ensures player.direction is reset to {x:0, y:0}
-             this.player.move(0, 0, this.world);
+            // --- MODIFIED: RESET MOVEMENT STATE ---
+            this.player.isMoving = false;
+            // --------------------------------------
         }
 
         const viewW = this.canvas.width / this.zoom;
@@ -757,9 +791,6 @@ export default class Game {
                     this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
                     this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
                     this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
-                    this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, 4); 
-                    this.ctx.fillRect(tx, ty, 4, CONFIG.TILE_SIZE); 
                     this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
 
                     this.ctx.fillStyle = (id===14 ? '#444' : id===15 ? '#ffd700' : '#777');
@@ -793,108 +824,108 @@ export default class Game {
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else {
                         const isPlayer = obj._type === 'player';
-                        const colorShirt = isPlayer ? '#3498db' : '#993333'; // Blue for Player, Dark Red for NPC
-                        const colorPants = isPlayer ? '#8B4513' : '#654321'; // Brown Pants
-                        const colorSkin = isPlayer ? '#ffcc99' : '#e0b090'; // Skin Tone
-                        const colorHelmet = '#8B6F43'; // Darker Brown
-                        const colorBoots = '#333333'; // Black/Dark Grey
+                        const colorShirt = isPlayer ? '#3498db' : '#993333';
+                        const colorPants = isPlayer ? '#8B4513' : '#654321';
+                        const colorSkin = isPlayer ? '#ffcc99' : '#e0b090';
+                        const colorHelmet = '#8B6F43';
+                        const colorBoots = '#333333';
 
-                        // Get the player's stored direction
-                        const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 }; // NPCs always face down for simplicity
+                        // --- IMPROVED WIGGLE LOGIC: State-driven sine wave ---
+                        const MOVE_CYCLE_SPEED = 0.006;
+                        const MAX_WIGGLE = 3;
                         
-                        // Movement for animation (Wiggle)
-                        const w = Math.cos(Date.now() / 100) * 2;
-                        const w2 = Math.cos(Date.now() / 100 + Math.PI) * 2;
+                        let footShift1 = 0;
+                        let footShift2 = 0;
+
+                        if (isPlayer && obj._orig.isMoving) {
+                            const phase = (obj._orig.moveTime * MOVE_CYCLE_SPEED) % (2 * Math.PI);
+                            footShift1 = Math.sin(phase) * MAX_WIGGLE; 
+                            footShift2 = Math.sin(phase + Math.PI) * MAX_WIGGLE;
+                        }
                         
-                        // Determine if the entity is moving (checking if direction is non-zero)
-                        const moving = isPlayer && (Math.abs(dir.x) > 0.01 || Math.abs(dir.y) > 0.01);
-                        
-                        // Feet/Hand animation offsets
-                        const wiggleX = moving ? w : 0;
-                        const wiggleX2 = moving ? w2 : 0;
-                        
-                        // Hand animation: shift inward on sideways movement
+                        // Hand shift logic
                         let handShift = 0;
-                        // Only shift hands if moving predominantly sideways
-                        if (isPlayer && Math.abs(dir.x) > Math.abs(dir.y) && moving) handShift = Math.sign(dir.x) * 4;
+                        const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 };
+                        const moving = isPlayer && obj._orig.isMoving;
+                        if (moving && Math.abs(dir.x) > Math.abs(dir.y)) handShift = Math.sign(dir.x) * 4;
+                        
+                        // --- PLAYER DIMENSIONS ---
+                        const BODY_W = 16;
+                        const BODY_X = obj.x - BODY_W / 2;
+                        const HEAD_SIZE = 12;
+                        const HEAD_Y = obj.y - 22;
+                        const HAND_LEFT_X = obj.x - 10;
+                        const HAND_RIGHT_X = obj.x + 6;
+                        // -------------------------
 
-                        // --- DRAWING ---
-
-                        // 1. FEET/BOOTS (Wiggle only when moving)
+                        // 1. FEET/BOOTS
                         this.ctx.fillStyle = colorBoots;
-                        this.ctx.fillRect(obj.x - 8 + wiggleX, obj.y + 12, 4, 4);  // Left Foot
-                        this.ctx.fillRect(obj.x + 4 + wiggleX2, obj.y + 12, 4, 4); // Right Foot
+                        this.ctx.fillRect(BODY_X + footShift1, obj.y + 10, 4, 4); 
+                        this.ctx.fillRect(BODY_X + BODY_W - 4 + footShift2, obj.y + 10, 4, 4); 
 
                         // 2. LEGS (Pants)
                         this.ctx.fillStyle = colorPants;
-                        this.ctx.fillRect(obj.x - 8, obj.y + 4, 16, 8); 
+                        this.ctx.fillRect(BODY_X, obj.y + 4, BODY_W, 6); 
 
                         // 3. BODY (Shirt/Tunic)
                         this.ctx.fillStyle = colorShirt;
-                        this.ctx.fillRect(obj.x - 8, obj.y - 8, 16, 16); 
+                        this.ctx.fillRect(BODY_X, obj.y - 8, BODY_W, 15); 
                         
-                        // 4. HANDS/ARMS (Shift inward on side movement)
+                        // 4. HANDS/ARMS
                         this.ctx.fillStyle = colorSkin;
+                        
                         if (handShift > 0) {
-                            // Moving Right: Left hand moves in
-                            this.ctx.fillRect(obj.x - 12 + handShift, obj.y - 4, 4, 4); // Left Hand (shifted right)
-                            this.ctx.fillRect(obj.x + 8, obj.y - 4, 4, 4);           // Right Hand (unaffected)
+                            this.ctx.fillRect(HAND_LEFT_X + handShift, obj.y - 4, 4, 4); 
+                            this.ctx.fillRect(HAND_RIGHT_X, obj.y - 4, 4, 4);           
                         } else if (handShift < 0) {
-                            // Moving Left: Right hand moves in
-                            this.ctx.fillRect(obj.x - 12, obj.y - 4, 4, 4);          // Left Hand (unaffected)
-                            this.ctx.fillRect(obj.x + 8 + handShift, obj.y - 4, 4, 4); // Right Hand (shifted left)
+                            this.ctx.fillRect(HAND_LEFT_X, obj.y - 4, 4, 4);          
+                            this.ctx.fillRect(HAND_RIGHT_X + handShift, obj.y - 4, 4, 4); 
                         } else {
-                            // Moving Up/Down or Stationary: Hands out
-                            this.ctx.fillRect(obj.x - 12, obj.y - 4, 4, 4); // Left Hand
-                            this.ctx.fillRect(obj.x + 8, obj.y - 4, 4, 4);  // Right Hand
+                            this.ctx.fillRect(HAND_LEFT_X, obj.y - 4, 4, 4); 
+                            this.ctx.fillRect(HAND_RIGHT_X, obj.y - 4, 4, 4);  
                         }
 
-                        // NEW SIZE: HEAD (12x12 instead of 8x8)
-                        const HEAD_SIZE = 12;
-                        const HEAD_Y = obj.y - 20; // Shift up to accommodate larger size
-                        
+                        // 5. HEAD 
                         this.ctx.fillStyle = colorSkin;
                         this.ctx.fillRect(obj.x - HEAD_SIZE/2, HEAD_Y, HEAD_SIZE, HEAD_SIZE); 
 
-                        // NEW SIZE: HELMET/HAT (14x8)
+                        // 6. HELMET/HAT
                         const HELMET_Y = HEAD_Y - 4;
                         this.ctx.fillStyle = colorHelmet;
                         this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HELMET_Y, HEAD_SIZE + 2, 6); 
 
-                        // NEW SIZE: EYES (3x3 instead of 2x2, adjusted position)
+                        // 7. EYES (Directional Logic)
                         const EYE_SIZE = 3;
-                        const EYE_Y = HEAD_Y + 3; // Centered vertically in new head
-                        
-                        // Default Eye Position (Facing Down/South)
+                        const EYE_Y = HEAD_Y + 3; 
                         let eyeX1 = obj.x - 5;
                         let eyeX2 = obj.x + 2;
                         let eyeDrawnSize = EYE_SIZE;
 
-                        if (Math.abs(dir.y) > Math.abs(dir.x) || !moving) {
+                        // Check for movement (or stationary) before determining look direction
+                        if (!moving || Math.abs(dir.y) >= Math.abs(dir.x)) {
                             // Moving Up/Down or Stationary (Y is dominant/static)
                             if (dir.y < 0 && moving) { // Upwards (North): Hide eyes
                                 eyeDrawnSize = 0;
-                            } else { // Downwards (South) or Stationary: Eyes centered
+                            } else { // Downwards (South) or Stationary
                                 eyeDrawnSize = EYE_SIZE;
                             }
                         } else if (Math.abs(dir.x) > Math.abs(dir.y)) {
                             // Moving Left or Right (X is dominant)
                             if (dir.x < 0) { // Left (West): Eyes shift to left side of face
-                                eyeX1 = obj.x - 5; // Left eye visible
-                                eyeX2 = obj.x - 2; // Right eye shifts to center
+                                eyeX1 = obj.x - 5; 
+                                eyeX2 = obj.x - 2; 
                             } else { // Right (East): Eyes shift to right side of face
-                                eyeX1 = obj.x + 2; // Right eye visible
-                                eyeX2 = obj.x - 1; // Left eye shifts to center
+                                eyeX1 = obj.x + 2; 
+                                eyeX2 = obj.x - 1; 
                             }
                         }
-
-                        // Draw the visible eyes
+                        
                         if (eyeDrawnSize > 0) {
                             this.ctx.fillStyle = '#000000';
                             this.ctx.fillRect(eyeX1, EYE_Y, eyeDrawnSize, eyeDrawnSize);
                             this.ctx.fillRect(eyeX2, EYE_Y, eyeDrawnSize, eyeDrawnSize);
                         }
-
+                        // -------------------------------------------------------------------
                         this.drawHealth(obj._orig); 
                     }
                 });
