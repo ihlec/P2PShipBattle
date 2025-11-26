@@ -465,7 +465,7 @@ export default class Game {
         }
     }
 
-    update(dt) {
+update(dt) {
         if (this.input.wheel !== 0) {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
@@ -484,16 +484,12 @@ export default class Game {
         if(this.input.keys['d'] || this.input.keys['arrowright']) dx = 1;
         
         if (dx || dy) {
-            // --- MODIFIED: TRACK MOVEMENT STATE AND TIME ---
             this.player.isMoving = true; 
             this.player.moveTime += dt;  
-            // ----------------------------------------------
             const len = Math.sqrt(dx*dx + dy*dy);
             this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
         } else {
-            // --- MODIFIED: RESET MOVEMENT STATE ---
             this.player.isMoving = false;
-            // --------------------------------------
         }
 
         const viewW = this.canvas.width / this.zoom;
@@ -513,7 +509,10 @@ export default class Game {
             const tile = this.world.getTile(ngx, ngy);
             const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
 
-            if (elevation < 0.35 && tile !== TILES.WATER.id && tile !== TILES.DEEP_WATER.id && !ID_TO_TILE[tile].solid) {
+            // MODIFIED: Check if the tile is any type of water
+            const isWater = tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
+
+            if (elevation < 0.35 && !isWater && !ID_TO_TILE[tile].solid) {
                 this.npcs.push(new Entity(nx, ny, 'npc'));
             }
         }
