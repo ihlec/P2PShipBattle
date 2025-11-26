@@ -142,6 +142,7 @@ const TILE_SIZE = 32;
 const PLAYER_SPEED_BASE = 4;
 const PLAYER_SPEED_ROAD = 8;
 const NPC_SPAWN_RATE = 0.005;
+const BUILD_RANGE = 200; // Restriction radius
 
 // --- TILE DEFINITIONS ---
 const TILES = {
@@ -151,12 +152,14 @@ const TILES = {
     GREY:  { id: 3, color: '#777777', solid: false, name: 'Stone/Road', short: 'Stn' },
     // Updated Solids: Only Walls and Water are solid now. Others are decorative/walkable.
     BLACK: { id: 4, color: '#111111', solid: false, name: 'Obsidian', short: 'Obs' }, 
-    IRON:  { id: 5, color: '#444444', solid: false, name: 'Iron Ammo', short: 'Irn' }, 
+    IRON:  { id: 5, color: '#444444', solid: false, name: 'Iron', short: 'Irn' }, 
     GOLD_1: { id: 6, color: '#b8860b', solid: false, damage: 10, name: 'Dull Gold', short: 'Gd1' },
     GOLD_2: { id: 7, color: '#ffd700', solid: false, damage: 20, name: 'Gold', short: 'Gld' },
     GOLD_3: { id: 8, color: '#ffec8b', solid: false, damage: 40, name: 'Bright Gold', short: 'Gd3' },
-    // NEW WALL LOGIC: ID 9
-    WALL:  { id: 9, color: '#777777', solid: true, name: 'Wall', short: 'Wal' } 
+    // NEW TILES
+    WALL:  { id: 9, color: '#777777', solid: true, name: 'Wall', short: 'Wal' },
+    WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
+    STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Stone Block', short: 'StB' } // For Cannon Barrel
 };
 
 const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
@@ -164,18 +167,33 @@ const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; retu
 // --- BLUEPRINT DEFINITIONS ---
 const BLUEPRINTS = [
     {
-        name: "Standard Cannon",
-        // Pattern: 5 Gold Row, 2 Black below center
+        name: "Stone Cannon",
+        // Structure: Wood Base, Stone Barrel (Now using STONE_BLOCK for correct 3D look)
         structure: [
-            {x:0, y:0, id: TILES.GOLD_2.id}, {x:1, y:0, id: TILES.GOLD_2.id}, {x:2, y:0, id: TILES.GOLD_2.id}, {x:3, y:0, id: TILES.GOLD_2.id}, {x:4, y:0, id: TILES.GOLD_2.id},
-            {x:1, y:1, id: TILES.BLACK.id}, {x:2, y:1, id: TILES.BLACK.id}
-        ]
+            {x:0, y:0, id: TILES.WOOD.id}, 
+            {x:0, y:-1, id: TILES.STONE_BLOCK.id} 
+        ],
+        // Cost: 1 Wood + 3 Stone
+        cost: { [TILES.WOOD.id]: 1, [TILES.GREY.id]: 3 }
+    },
+    {
+        name: "Iron Cannon",
+        structure: [
+            {x:0, y:0, id: TILES.WOOD.id},
+            {x:0, y:-1, id: TILES.IRON.id}
+        ],
+        cost: { [TILES.WOOD.id]: 1, [TILES.IRON.id]: 3 }
+    },
+    {
+        name: "Gold Cannon",
+        structure: [
+            {x:0, y:0, id: TILES.WOOD.id},
+            {x:0, y:-1, id: TILES.GOLD_2.id}
+        ],
+        cost: { [TILES.WOOD.id]: 1, [TILES.GOLD_2.id]: 3 }
     },
     {
         name: "Stone Wall",
-        // Two stones on the SAME spot (Stacking)
-        // By listing the same coord twice, the requirements calculation sees 2 STN needed
-        // And the placement loop will trigger the "stacking" logic twice.
         structure: [
             {x:0, y:0, id: TILES.GREY.id},
             {x:0, y:0, id: TILES.GREY.id}
@@ -279,13 +297,12 @@ class World {
     isSolid(x, y) {
         const id = this.getTile(x, y);
         const tile = ID_TO_TILE[id];
-        // Wall is solid, Road (Grey) is not.
         return tile.solid;
     }
 
     isRoad(x, y) {
         const id = this.getTile(x, y);
-        // Only standard Grey is a road. Wall (ID 9) is not.
+        // Only standard Grey is a road. Wall (ID 9) and Stone Block (ID 11) are not.
         return id === TILES.GREY.id;
     }
 }
@@ -298,19 +315,31 @@ class Particle {
     update() { this.x += this.dx; this.y += this.dy; this.life--; }
 }
 
-// NEW: Damage Text Class
 class DamageText {
     constructor(x, y, amount, color) {
         this.x = x;
         this.y = y;
-        this.amount = Math.floor(amount);
+        // FIX: Only apply Math.floor if amount is a number. Allow strings for Loot/Reloads.
+        this.amount = (typeof amount === 'number') ? Math.floor(amount) : amount;
         this.color = color;
-        this.life = 60; // 1 second @ 60fps
-        this.dy = -1; // Float up speed
+        this.life = 60; 
+        this.dy = -1; 
     }
     update() {
         this.y += this.dy;
         this.life--;
+    }
+}
+
+// NEW: Loot Item Class
+class Loot {
+    constructor(x, y, id, qty) {
+        this.x = x; 
+        this.y = y;
+        this.id = id;
+        this.qty = qty;
+        this.bobOffset = Math.random() * 100;
+        this.pickedUp = false;
     }
 }
 
@@ -340,33 +369,23 @@ class Entity {
             [TILES.GOLD_2.id]: 20,
             [TILES.IRON.id]: 50,
             [TILES.GOLD_1.id]: 10,
-            [TILES.GOLD_3.id]: 10
+            [TILES.GOLD_3.id]: 10,
+            [TILES.WOOD.id]: 20
         };
         this.selectedTile = TILES.GREY.id;
-        // Buffer for continuous damage to prevent number spam
         this.damageBuffer = 0; 
     }
 
     move(dx, dy, world) {
-        // UPGRADED COLLISION: AABB (Axis-Aligned Bounding Box)
-        // We check the 4 corners of the entity against the grid to prevent
-        // walking over walls "at all".
-        
-        // FIX: Reduced hitbox size significantly (from -0.5 to -4)
-        // Visual size is 32px. Hitbox is now 24px.
-        // This creates a 4px "forgiveness buffer" on edges, making it easy to slide through 1-tile gaps.
         const hitboxBuffer = 4;
         const halfSize = (TILE_SIZE / 2) - hitboxBuffer; 
         
-        // Helper to check if a rect defined by (x,y) overlaps a solid tile
         const isPositionSafe = (targetX, targetY) => {
-            // Define corners
             const left = targetX - halfSize;
             const right = targetX + halfSize;
             const top = targetY - halfSize;
             const bottom = targetY + halfSize;
 
-            // Check all 4 corners
             const points = [
                 {x: left, y: top},
                 {x: right, y: top},
@@ -375,30 +394,25 @@ class Entity {
             ];
 
             for (let p of points) {
-                // Convert pixel coord to grid index
                 const gx = Math.floor(p.x / TILE_SIZE);
                 const gy = Math.floor(p.y / TILE_SIZE);
-                if (world.isSolid(gx, gy)) return false; // Collision detected
+                if (world.isSolid(gx, gy)) return false; 
             }
-            return true; // Safe
+            return true; 
         };
 
-        // UNSTUCK LOGIC: If currently stuck (glitched), ignore collision to let player escape
         const centerGx = Math.floor(this.x / TILE_SIZE);
         const centerGy = Math.floor(this.y / TILE_SIZE);
         const currentlyStuck = world.isSolid(centerGx, centerGy);
 
-        // 1. Check X Movement
         if (currentlyStuck || isPositionSafe(this.x + dx, this.y)) {
             this.x += dx;
         }
 
-        // 2. Check Y Movement (Independently for sliding)
         if (currentlyStuck || isPositionSafe(this.x, this.y + dy)) {
             this.y += dy;
         }
 
-        // 3. Update speed based on final tile (Center point check is fine for road bonus)
         const finalGridX = Math.floor(this.x / TILE_SIZE);
         const finalGridY = Math.floor(this.y / TILE_SIZE);
         if (world.isRoad(finalGridX, finalGridY)) this.speed = PLAYER_SPEED_ROAD;
@@ -419,9 +433,10 @@ class Game {
         this.player = new Entity(spawn.x, spawn.y, 'player');
 
         this.npcs = [];
+        this.lootItems = []; // Stores dropped items
         this.projectiles = [];
         this.particles = [];
-        this.damageTexts = []; // New array for floating text
+        this.damageTexts = []; 
         this.camera = { x: 0, y: 0 };
         this.zoom = 1; 
         
@@ -429,8 +444,6 @@ class Game {
         this.lastTime = 0;
         this.regenTimer = 0;
         this.godMode = false;
-        
-        // Blueprint State
         this.activeBlueprint = null;
 
         window.addEventListener('keyup', (e) => {
@@ -454,8 +467,8 @@ class Game {
 
     initUI() {
         const bar = document.getElementById('inventory-bar');
-        bar.innerHTML = ''; // Clear prev
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD_1, TILES.GOLD_2, TILES.GOLD_3];
+        bar.innerHTML = ''; 
+        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD_1, TILES.GOLD_2, TILES.GOLD_3, TILES.WOOD];
         
         usable.forEach((t) => {
             const slot = document.createElement('div');
@@ -467,27 +480,33 @@ class Game {
             `;
             slot.onclick = () => {
                 this.player.selectedTile = t.id;
-                this.activeBlueprint = null; // Clear BP when selecting item
+                this.activeBlueprint = null; 
                 this.updateUIHighlight();
                 this.updateBPDisplay();
             };
             bar.appendChild(slot);
         });
         
-        // Init Blueprint Menu
         const menu = document.getElementById('blueprint-menu');
         menu.innerHTML = '';
         BLUEPRINTS.forEach(bp => {
             const div = document.createElement('div');
             div.className = 'bp-item';
             
-            // Calculate Requirements
             const reqs = {};
-            bp.structure.forEach(part => {
-                const t = ID_TO_TILE[part.id];
-                if(!reqs[t.short]) reqs[t.short] = 0;
-                reqs[t.short]++;
-            });
+            if (bp.cost) {
+                Object.entries(bp.cost).forEach(([id, qty]) => {
+                    const t = ID_TO_TILE[id];
+                    reqs[t.short] = qty;
+                });
+            } else {
+                bp.structure.forEach(part => {
+                    const t = ID_TO_TILE[part.id];
+                    if(!reqs[t.short]) reqs[t.short] = 0;
+                    reqs[t.short]++;
+                });
+            }
+            
             const reqStr = Object.entries(reqs).map(([k, v]) => `${v} ${k}`).join(', ');
 
             div.innerHTML = `
@@ -496,7 +515,7 @@ class Game {
             `;
             div.onclick = () => {
                 this.activeBlueprint = bp;
-                toggleBlueprints(); // Close menu
+                toggleBlueprints();
                 this.updateBPDisplay();
             };
             menu.appendChild(div);
@@ -522,11 +541,8 @@ class Game {
             for (let x = -radius; x <= radius; x++) {
                 for (let y = -radius; y <= radius; y++) {
                     if (Math.abs(x) !== radius && Math.abs(y) !== radius) continue;
-                    
-                    // Center check
                     if (this.world.getTile(x, y) === TILES.WATER.id) continue;
                     
-                    // Neighbor Check (Must be inland)
                     let safe = true;
                     for(let dx=-1; dx<=1; dx++) {
                         for(let dy=-1; dy<=1; dy++) {
@@ -537,10 +553,7 @@ class Game {
                         }
                         if(!safe) break;
                     }
-                    
-                    if(safe) {
-                        return { x: (x * TILE_SIZE) + (TILE_SIZE / 2), y: (y * TILE_SIZE) + (TILE_SIZE / 2) };
-                    }
+                    if(safe) return { x: (x * TILE_SIZE) + (TILE_SIZE / 2), y: (y * TILE_SIZE) + (TILE_SIZE / 2) };
                 }
             }
             radius++;
@@ -550,7 +563,7 @@ class Game {
 
     updateUIHighlight() {
         const slots = document.querySelectorAll('.slot');
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD_1, TILES.GOLD_2, TILES.GOLD_3];
+        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD_1, TILES.GOLD_2, TILES.GOLD_3, TILES.WOOD];
         slots.forEach((s, i) => {
             if(!this.activeBlueprint && usable[i].id === this.player.selectedTile) s.classList.add('active');
             else s.classList.remove('active');
@@ -558,42 +571,39 @@ class Game {
     }
 
     scanForCannons() {
-        this.cannons = []; 
         const px = Math.floor(this.player.x / TILE_SIZE);
         const py = Math.floor(this.player.y / TILE_SIZE);
         const radius = 20; 
 
+        const nextCannons = [];
         for(let y = py - radius; y < py + radius; y++) {
             for(let x = px - radius; x < px + radius; x++) {
-                // Check 5 horizontal golds
-                let damageAccumulator = 0;
-                let validGold = true;
-                let firstGoldType = -1;
+                const baseId = this.world.getTile(x, y);
+                const topId = this.world.getTile(x, y - 1);
+                
+                if (baseId === TILES.WOOD.id) {
+                    let damage = 0;
+                    if (topId === TILES.STONE_BLOCK.id) damage = 20;
+                    else if (topId === TILES.IRON.id) damage = 40;
+                    else if (topId === TILES.GOLD_2.id) damage = 80;
 
-                for(let k=0; k<5; k++) {
-                    const tid = this.world.getTile(x+k, y);
-                    const tile = ID_TO_TILE[tid];
-                    if(!tile || !tile.name.includes('Gold')) { validGold = false; break; }
-                    if (firstGoldType === -1) firstGoldType = tid;
-                    else if (tid !== firstGoldType) { validGold = false; break; }
-                    damageAccumulator += tile.damage || 0;
-                }
-
-                if(validGold) {
-                    const b1 = this.world.getTile(x+1, y+1);
-                    const b2 = this.world.getTile(x+2, y+1);
-                    if(b1 === TILES.BLACK.id && b2 === TILES.BLACK.id) {
-                        this.cannons.push({
-                            x: (x + 2) * TILE_SIZE,
-                            y: y * TILE_SIZE,
-                            damage: damageAccumulator / 5,
-                            cooldown: 0,
-                            range: 300
+                    if (damage > 0) {
+                        const key = `${x},${y}`;
+                        const prev = this.cannons.find(c => c.key === key);
+                        nextCannons.push({
+                            key: key,
+                            x: (x * TILE_SIZE) + (TILE_SIZE/2),
+                            y: ((y - 1) * TILE_SIZE) + (TILE_SIZE/2), 
+                            damage: damage,
+                            cooldown: prev ? prev.cooldown : 0,
+                            range: 300,
+                            ammo: prev ? prev.ammo : 0
                         });
                     }
                 }
             }
         }
+        this.cannons = nextCannons;
     }
 
     spawnNPC() {
@@ -608,37 +618,39 @@ class Game {
         }
     }
 
-    // Logic to handle tile placement with stacking
+    // Check if a specific tile grid coordinate is occupied by an entity
+    isTileOccupiedByEntity(gx, gy) {
+        // Check Player
+        const px = Math.floor(this.player.x / TILE_SIZE);
+        const py = Math.floor(this.player.y / TILE_SIZE);
+        if (px === gx && py === gy) return true;
+
+        // Check NPCs
+        for(let npc of this.npcs) {
+            const nx = Math.floor(npc.x / TILE_SIZE);
+            const ny = Math.floor(npc.y / TILE_SIZE);
+            if (nx === gx && ny === gy) return true;
+        }
+        return false;
+    }
+
     smartPlaceTile(gx, gy, id, isBlueprint = false) {
         const currentId = this.world.getTile(gx, gy);
-        
-        // Definition of "Occupied": Any tile that isn't natural ground (Water/Grass/Sand)
-        // IDs: 0=Water, 1=Grass, 2=Sand. All constructed blocks are > 2.
         const isOccupied = currentId > 2;
 
+        // RESTRICTION: Check entity intersection before placing
+        if (this.isTileOccupiedByEntity(gx, gy)) return;
+
         if (isBlueprint) {
-            // --- BLUEPRINT LOGIC (Privileged) ---
-            
-            // Stacking Logic: Stone on Stone -> Wall
-            // This enables the "Stone Wall" blueprint to function by stacking 2 stones.
             if (id === TILES.GREY.id && currentId === TILES.GREY.id) {
                 this.world.setTile(gx, gy, TILES.WALL.id);
                 return;
             }
-
-            // Blueprints can overwrite existing blocks if needed
             if (id !== currentId) {
                  this.world.setTile(gx, gy, id);
             }
         } else {
-            // --- MANUAL LOGIC (Restricted) ---
-            
-            // Rule: "Two blocks cannot be put into the same spot"
-            if (isOccupied) {
-                return; // Block placement
-            }
-
-            // Standard placement on empty ground
+            if (isOccupied) return; 
             if (id !== currentId) {
                  this.world.setTile(gx, gy, id);
             }
@@ -658,11 +670,7 @@ class Game {
         }
 
         this.regenTimer += dt;
-        // BALANCE FIX: Player recovery lower (1 HP every 2 seconds instead of 2 HP every 1 second)
-        // Previous: > 1000ms, +2 HP. (2.0 HP/s)
-        // New:      > 2000ms, +1 HP. (0.5 HP/s)
         if (this.regenTimer > 2000) {
-            // ONLY Player regenerates. NPCs do not.
             if (this.player.hp < 100) this.player.hp = Math.min(100, this.player.hp + 1);
             this.regenTimer = 0;
         }
@@ -694,90 +702,126 @@ class Game {
             const gx = Math.floor(mx / TILE_SIZE);
             const gy = Math.floor(my / TILE_SIZE);
 
-            if(this.input.mouse.left) {
-                // If Blueprint Active
-                if(this.activeBlueprint) {
-                    // Check Cost
-                    let canBuild = true;
-                    // Count needs
-                    const needs = {};
-                    this.activeBlueprint.structure.forEach(part => {
-                        const pid = part.id;
-                        if(!needs[pid]) needs[pid] = 0;
-                        needs[pid]++;
-                    });
-                    
-                    // Verify inventory (Skip check if God Mode)
-                    if (!this.godMode) {
-                        for(const [pid, count] of Object.entries(needs)) {
-                            if((this.player.inventory[pid] || 0) < count) canBuild = false;
+            // RESTRICTION: Range Check
+            const distToMouse = Math.sqrt(Math.pow(this.player.x - mx, 2) + Math.pow(this.player.y - my, 2));
+            const inRange = distToMouse <= BUILD_RANGE;
+
+            if (inRange) {
+                if(this.input.mouse.left) {
+                    // MANUAL CANNON RELOAD
+                    // Check if clicking on a cannon with IRON selected
+                    if (this.player.selectedTile === TILES.IRON.id) {
+                        // Clicked near a cannon base or top?
+                        const clickedCannon = this.cannons.find(c => {
+                            // Check dist to cannon top
+                            const dc = Math.sqrt(Math.pow(c.x - mx, 2) + Math.pow(c.y - my, 2));
+                            return dc < TILE_SIZE * 1.5;
+                        });
+
+                        if (clickedCannon) {
+                            // Reload Logic
+                            if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
+                                if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
+                                clickedCannon.ammo += 5;
+                                this.spawnDamageText(clickedCannon.x, clickedCannon.y, "+5 AMMO", "#00ffff");
+                                this.input.mouse.left = false; // Consume click
+                                return; // Don't place block
+                            }
                         }
                     }
 
-                    if(canBuild) {
-                        // Deduct and Place (Skip deduction if God Mode)
+                    if(this.activeBlueprint) {
+                        let canBuild = true;
+                        const needs = {};
+                        if (this.activeBlueprint.cost) {
+                            Object.entries(this.activeBlueprint.cost).forEach(([id, qty]) => {
+                                needs[id] = qty;
+                            });
+                        } else {
+                            this.activeBlueprint.structure.forEach(part => {
+                                const pid = part.id;
+                                if(!needs[pid]) needs[pid] = 0;
+                                needs[pid]++;
+                            });
+                        }
+                        
                         if (!this.godMode) {
                             for(const [pid, count] of Object.entries(needs)) {
-                                this.player.inventory[pid] -= count;
+                                if((this.player.inventory[pid] || 0) < count) canBuild = false;
                             }
                         }
-                        
-                        this.activeBlueprint.structure.forEach(part => {
-                            // PASS TRUE for Blueprint Mode
-                            this.smartPlaceTile(gx + part.x, gy + part.y, part.id, true);
-                        });
-                        this.scanForCannons();
-                        this.input.mouse.left = false; 
-                    }
-                } 
-                // Normal Placement
-                else {
-                    const toPlace = this.player.selectedTile;
-                    // Allow placement if God Mode OR if player has inventory
-                    if(this.godMode || this.player.inventory[toPlace] > 0) {
-                        const prevTile = this.world.getTile(gx, gy);
-                        
-                        // PASS FALSE for Manual Mode
-                        this.smartPlaceTile(gx, gy, toPlace, false);
-                        
-                        // Only deduct if something actually changed (placement succeeded)
-                        if (this.world.getTile(gx, gy) !== prevTile) {
-                            // Only deduct if NOT in God Mode
+
+                        if(canBuild) {
                             if (!this.godMode) {
-                                this.player.inventory[toPlace]--;
+                                for(const [pid, count] of Object.entries(needs)) {
+                                    this.player.inventory[pid] -= count;
+                                }
                             }
-                            this.scanForCannons(); 
+                            
+                            this.activeBlueprint.structure.forEach(part => {
+                                this.smartPlaceTile(gx + part.x, gy + part.y, part.id, true);
+                            });
+                            this.scanForCannons();
+                            this.input.mouse.left = false; 
+                        }
+                    } 
+                    else {
+                        const toPlace = this.player.selectedTile;
+                        if(this.godMode || this.player.inventory[toPlace] > 0) {
+                            const prevTile = this.world.getTile(gx, gy);
+                            this.smartPlaceTile(gx, gy, toPlace, false);
+                            if (this.world.getTile(gx, gy) !== prevTile) {
+                                if (!this.godMode) {
+                                    this.player.inventory[toPlace]--;
+                                }
+                                this.scanForCannons(); 
+                            }
                         }
                     }
-                }
-            } else {
-                // Right click cancels blueprint
-                if (this.activeBlueprint) {
-                    this.activeBlueprint = null;
-                    this.updateBPDisplay();
-                    this.updateUIHighlight();
                 } else {
-                    // Break
-                    const current = this.world.getTile(gx, gy);
-                    
-                    if (current === TILES.WALL.id) {
-                        // Breaking Wall -> Becomes Road + Refunds 1 Stone
-                        this.world.setTile(gx, gy, TILES.GREY.id);
-                        this.player.inventory[TILES.GREY.id]++;
-                        this.scanForCannons();
-                    }
-                    else if(current !== TILES.GRASS.id && current !== TILES.WATER.id && current !== TILES.SAND.id) {
-                        // Normal Break
-                        this.world.setTile(gx, gy, TILES.GRASS.id); 
-                        if(!this.player.inventory[current]) this.player.inventory[current] = 0;
-                        this.player.inventory[current]++;
-                        this.scanForCannons();
+                    // RIGHT CLICK BREAK
+                    if (this.activeBlueprint) {
+                        this.activeBlueprint = null;
+                        this.updateBPDisplay();
+                        this.updateUIHighlight();
+                    } else {
+                        const current = this.world.getTile(gx, gy);
+                        
+                        if (current === TILES.WALL.id) {
+                            this.world.setTile(gx, gy, TILES.GREY.id);
+                            this.player.inventory[TILES.GREY.id]++;
+                            this.scanForCannons();
+                        }
+                        else if(current !== TILES.GRASS.id && current !== TILES.WATER.id && current !== TILES.SAND.id) {
+                            this.world.setTile(gx, gy, TILES.GRASS.id); 
+                            if(!this.player.inventory[current]) this.player.inventory[current] = 0;
+                            this.player.inventory[current]++;
+                            this.scanForCannons();
+                        }
                     }
                 }
             }
         }
 
         if(Math.random() < NPC_SPAWN_RATE && this.npcs.length < 20) this.spawnNPC();
+
+        // LOOT PICKUP
+        this.lootItems.forEach(item => {
+            if (item.pickedUp) return;
+            const d = Utils.distance(this.player, item);
+            if (d < TILE_SIZE) {
+                // Pick up
+                if(!this.player.inventory[item.id]) this.player.inventory[item.id] = 0;
+                this.player.inventory[item.id] += item.qty;
+                item.pickedUp = true;
+                
+                // FIX: Randomize text position slightly to prevent overlap when picking up stack
+                const tx = this.player.x + (Math.random() - 0.5) * 40;
+                const ty = this.player.y - 40 + (Math.random() - 0.5) * 20;
+                this.spawnDamageText(tx, ty, `+${item.qty} ${ID_TO_TILE[item.id].short}`, "#ffff00");
+            }
+        });
+        this.lootItems = this.lootItems.filter(i => !i.pickedUp);
 
         this.npcs.forEach(npc => {
             if(npc.dead) return;
@@ -787,7 +831,6 @@ class Game {
             const my = Math.sin(angle) * npc.speed;
             npc.move(mx, my, this.world);
             
-            // SENIOR DEV FIX: 
             const playerHalf = TILE_SIZE / 2;
             const npcHalf = TILE_SIZE / 2;
             const touchThreshold = playerHalf + npcHalf + 0.5; 
@@ -798,7 +841,6 @@ class Game {
             if(collisionX && collisionY) {
                 const seconds = dt / 1000;
 
-                // Player takes damage (Always happens on contact)
                 if (!this.godMode) {
                      const damage = 5 * seconds;
                      this.player.hp -= damage;
@@ -810,34 +852,25 @@ class Game {
                      }
                 }
                 
-                // NPC Damage Logic: PURE MOMENTUM + KNOCKBACK
-                
-                // Vector Check: Are we moving towards the enemy?
                 const toEnemyX = npc.x - this.player.x;
                 const toEnemyY = npc.y - this.player.y;
-                // Dot product calculates the angle coherence. > 0 means "generally towards".
                 const dotProduct = (dx * toEnemyX) + (dy * toEnemyY);
 
-                // FIX: Only deal damage if speed > 1 AND we are moving towards the target
                 if (currentSpeed > 1 && dotProduct > 0) { 
-                    // Damage Formula: Pure Speed.
                     let impactDmg = currentSpeed * 20; 
                     if (this.godMode) impactDmg = 9999;
 
                     npc.hp -= impactDmg;
                     this.spawnDamageText(npc.x, npc.y - 20, impactDmg, '#ffffff'); 
                     
-                    // Visual feedback
                     for(let i=0; i<5; i++) {
                         this.particles.push(new Particle(npc.x, npc.y, '#ff0000', (Math.random()-0.5)*8, (Math.random()-0.5)*8, 15));
                     }
 
-                    // KNOCKBACK NPC (Push them away)
                     const knockbackDist = 40; 
                     const bx = npc.x - Math.cos(angle) * knockbackDist;
                     const by = npc.y - Math.sin(angle) * knockbackDist;
                     
-                    // Check if knockback target is safe (don't push into walls)
                     const bgx = Math.round(bx / TILE_SIZE);
                     const bgy = Math.round(by / TILE_SIZE);
                     
@@ -846,16 +879,22 @@ class Game {
                         npc.y = by;
                     }
                 } 
-                // If moving away (dotProduct <= 0), no damage is dealt.
 
-                // Death Check
                 if(npc.hp <= 0) {
                     npc.dead = true;
-                    this.player.inventory[TILES.BLACK.id] += 2;
-                    if(Math.random() > 0.5) this.player.inventory[TILES.GOLD_1.id]++;
-                    if(Math.random() > 0.8) this.player.inventory[TILES.GOLD_2.id]++;
-                    if(Math.random() > 0.95) this.player.inventory[TILES.GOLD_3.id]++;
-                    this.player.inventory[TILES.IRON.id] += 5;
+                    // DROP LOOT - FIX: ADD SPREAD
+                    const spread = 24;
+                    
+                    // Black x2
+                    this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.BLACK.id, 2));
+                    
+                    // Random Gold
+                    if(Math.random() > 0.5) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_1.id, 1));
+                    if(Math.random() > 0.8) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_2.id, 1));
+                    if(Math.random() > 0.95) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_3.id, 1));
+                    
+                    // Iron
+                    this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.IRON.id, 5));
                 }
             }
         });
@@ -863,8 +902,18 @@ class Game {
         this.cannons.forEach(cannon => {
             if(cannon.cooldown > 0) cannon.cooldown--;
             else {
-                // Allow firing if God Mode OR if player has ammo
-                if(this.godMode || this.player.inventory[TILES.IRON.id] > 0) {
+                // AUTO RELOAD REMOVED as per request
+                /*
+                if (cannon.ammo <= 0) {
+                    if (this.player.inventory[TILES.IRON.id] > 0) {
+                        this.player.inventory[TILES.IRON.id]--;
+                        cannon.ammo += 5; 
+                        this.spawnDamageText(cannon.x, cannon.y, "RELOAD", "#00ffff");
+                    }
+                }
+                */
+
+                if(cannon.ammo > 0) {
                     let target = null;
                     let minDist = cannon.range;
                     this.npcs.forEach(npc => {
@@ -873,10 +922,8 @@ class Game {
                         if(d < minDist) { minDist = d; target = npc; }
                     });
                     if(target) {
-                        // Consume ammo only if NOT in God Mode
-                        if (!this.godMode) {
-                            this.player.inventory[TILES.IRON.id]--;
-                        }
+                        if (!this.godMode) cannon.ammo--;
+                        
                         this.projectiles.push(new Projectile(cannon.x, cannon.y, target.x, target.y, cannon.damage));
                         cannon.cooldown = 60; 
                         for(let i=0; i<5; i++) {
@@ -899,11 +946,14 @@ class Game {
                     }
                     if(npc.hp <= 0) {
                         npc.dead = true;
-                        this.player.inventory[TILES.BLACK.id] += 2;
-                        if(Math.random() > 0.5) this.player.inventory[TILES.GOLD_1.id]++;
-                        if(Math.random() > 0.8) this.player.inventory[TILES.GOLD_2.id]++;
-                        if(Math.random() > 0.95) this.player.inventory[TILES.GOLD_3.id]++;
-                         this.player.inventory[TILES.IRON.id] += 5;
+                        // DROP LOOT - FIX: ADD SPREAD
+                        const spread = 24;
+                        
+                        this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.BLACK.id, 2));
+                        if(Math.random() > 0.5) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_1.id, 1));
+                        if(Math.random() > 0.8) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_2.id, 1));
+                        if(Math.random() > 0.95) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_3.id, 1));
+                        this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.IRON.id, 5));
                     }
                 }
             });
@@ -933,23 +983,15 @@ class Game {
         }
     }
 
-    // HELPER: Draw Health Bar
     drawHealthBar(entity) {
         const x = entity.x - this.camera.x;
-        // Center of entity is entity.y. Bottom of entity is entity.y + 16.
-        // We want bar inside, so we go up from bottom.
-        // Bar Height = 4, Padding = 2.
-        // Y = Center + HalfSize - BarHeight - Padding
         const y = (entity.y - this.camera.y) + (TILE_SIZE / 2) - 4 - 2; 
-        
-        const w = TILE_SIZE - 4; // Slight padding on sides
+        const w = TILE_SIZE - 4; 
         const h = 4;
 
-        // Background (Red)
         this.ctx.fillStyle = '#550000';
         this.ctx.fillRect(x - w/2, y, w, h);
 
-        // Foreground (Green)
         const pct = Math.max(0, entity.hp / 100);
         this.ctx.fillStyle = '#00ff00';
         this.ctx.fillRect(x - w/2, y, w * pct, h);
@@ -982,19 +1024,19 @@ class Game {
 
                     this.ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
                     
-                    // NEW VISUAL: Wall Height/Shadow (Bevel Effect)
-                    if (id === TILES.WALL.id) {
-                         // 1. Shadow (Bottom and Right)
+                    // RENDER SHADOWS FOR BLOCKS
+                    if (id === TILES.WALL.id || id === TILES.WOOD.id || id === TILES.STONE_BLOCK.id ||
+                        id === TILES.IRON.id || id === TILES.GOLD_1.id || id === TILES.GOLD_2.id || 
+                        id === TILES.GOLD_3.id || id === TILES.BLACK.id) {
+                         
                          this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                         this.ctx.fillRect(tx, ty + TILE_SIZE - 6, TILE_SIZE, 6); // Bottom shadow
-                         this.ctx.fillRect(tx + TILE_SIZE - 6, ty, 6, TILE_SIZE); // Right shadow
+                         this.ctx.fillRect(tx, ty + TILE_SIZE - 6, TILE_SIZE, 6); // Bottom
+                         this.ctx.fillRect(tx + TILE_SIZE - 6, ty, 6, TILE_SIZE); // Right
                          
-                         // 2. Highlight (Top and Left) - Optional, adds pop
                          this.ctx.fillStyle = 'rgba(255,255,255,0.2)';
-                         this.ctx.fillRect(tx, ty, TILE_SIZE, 4);
-                         this.ctx.fillRect(tx, ty, 4, TILE_SIZE);
+                         this.ctx.fillRect(tx, ty, TILE_SIZE, 4); // Top
+                         this.ctx.fillRect(tx, ty, 4, TILE_SIZE); // Left
                          
-                         // 3. Top Face (Main area)
                          this.ctx.fillStyle = tile.color;
                          this.ctx.fillRect(tx + 4, ty + 4, TILE_SIZE - 10, TILE_SIZE - 10);
                     }
@@ -1002,7 +1044,6 @@ class Game {
             }
         }
 
-        // Draw Ghost Blueprint
         if (this.activeBlueprint) {
             const mx = (this.input.mouse.x / this.zoom) + this.camera.x;
             const my = (this.input.mouse.y / this.zoom) + this.camera.y;
@@ -1022,7 +1063,21 @@ class Game {
             this.ctx.globalAlpha = 1.0;
         }
 
-        // Draw Player & Health
+        // RENDER LOOT
+        this.lootItems.forEach(item => {
+            const tile = ID_TO_TILE[item.id];
+            const lx = item.x - this.camera.x;
+            // Bob animation
+            const bob = Math.sin((Date.now() / 200) + item.bobOffset) * 3;
+            const ly = item.y - this.camera.y + bob;
+            
+            this.ctx.fillStyle = tile.color;
+            // Small Item Box
+            this.ctx.fillRect(lx - 6, ly - 6, 12, 12);
+            this.ctx.strokeStyle = '#fff';
+            this.ctx.strokeRect(lx - 6, ly - 6, 12, 12);
+        });
+
         this.ctx.fillStyle = '#ff0000'; 
         this.ctx.fillRect(
             this.player.x - this.camera.x - (TILE_SIZE/2),
@@ -1031,10 +1086,7 @@ class Game {
         );
         this.drawHealthBar(this.player);
 
-        // Draw NPCs & Health
         this.npcs.forEach(npc => {
-            // FIX: Set Color to Black INSIDE the loop. 
-            // Previous code set it outside, but drawHealthBar set it to Green, leaking to the next NPC.
             this.ctx.fillStyle = '#000'; 
             this.ctx.fillRect(
                 npc.x - this.camera.x - (TILE_SIZE/2),
@@ -1056,14 +1108,34 @@ class Game {
             this.ctx.fillRect(p.x - this.camera.x, p.y - this.camera.y, 4, 4);
         });
         
-        // Draw Damage Texts
         this.ctx.font = "bold 14px 'Courier New'";
         this.damageTexts.forEach(d => {
             this.ctx.fillStyle = d.color;
-            this.ctx.fillText(d.amount, d.x - this.camera.x, d.y - this.camera.y);
+            if (typeof d.amount === 'string') {
+                this.ctx.fillText(d.amount, d.x - this.camera.x, d.y - this.camera.y);
+            } else {
+                this.ctx.fillText(Math.floor(d.amount), d.x - this.camera.x, d.y - this.camera.y);
+            }
         });
         
-        // REMOVED CANNON DEBUG BOX
+        // Draw Cannon Ammo Indicators
+        this.ctx.font = "10px monospace";
+        this.cannons.forEach(c => {
+            const cx = c.x - this.camera.x;
+            const cy = c.y - this.camera.y;
+            
+            // Ammo Text
+            this.ctx.fillStyle = c.ammo > 0 ? '#00ffff' : '#ff0000';
+            this.ctx.fillText(`A:${c.ammo}`, cx - 10, cy - 25);
+        });
+        
+        // Draw Range Circle (Optional visual feedback when placing)
+        if (this.input.mouse.left || this.activeBlueprint) {
+             this.ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+             this.ctx.beginPath();
+             this.ctx.arc(this.player.x - this.camera.x, this.player.y - this.camera.y, BUILD_RANGE, 0, Math.PI*2);
+             this.ctx.stroke();
+        }
         
         this.ctx.restore();
     }
