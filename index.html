@@ -79,7 +79,8 @@ const TILES = {
     TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir' },
     TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd' },
     ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' },
-    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal' }
+    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal' },
+    WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral' }
 };
 
 const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
@@ -90,6 +91,7 @@ const BLUEPRINTS = [
     { name: "Gold Tower", structure: [{x:0, y:0, id: TILES.TOWER_BASE_GOLD.id}], cost: { [TILES.GREY.id]: 1, [TILES.GOLD.id]: 3, [TILES.WOOD.id]: 1 } },
     { name: "Stone Wall", structure: [{x:0, y:0, id: TILES.WALL.id}], cost: { [TILES.GREY.id]: 2 } },
     { name: "Wood Wall", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
+    { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
     { name: "Road Segment", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1 } }
 ];
 
@@ -407,6 +409,22 @@ class Game {
 
             if (this.activeBlueprint) {
                 const costMap = this.activeBlueprint.cost || {};
+                
+                // --- SPECIAL CHECKS ---
+                if (this.activeBlueprint.special === 'bridge') {
+                    // Smart Bridge Check: Must target Water or existing Rail
+                    const targetId = this.world.getTile(gx, gy);
+                    if (targetId !== TILES.WATER.id && targetId !== TILES.WOOD_RAIL.id) {
+                         this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00");
+                         return;
+                    }
+                } else if (this.activeBlueprint.requiresWater) {
+                    if (this.world.getTile(gx, gy) !== TILES.WATER.id) {
+                         this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00");
+                         return;
+                    }
+                }
+
                 let affordable = true;
                 for (let [id, qty] of Object.entries(costMap)) {
                     if (!canAfford(id, qty)) affordable = false;
@@ -414,11 +432,33 @@ class Game {
 
                 if (affordable) {
                     let built = false;
+                    
+                    // Identify if this is a Bridge Blueprint
+                    const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
+
                     this.activeBlueprint.structure.forEach(part => {
-                        if (this.tryBuild(gx + part.x, gy + part.y, part.id)) built = true;
+                        // Allow overwriting Rails if we are building a bridge
+                        const overwriteRail = this.activeBlueprint.special === 'bridge';
+                        if (this.tryBuild(gx + part.x, gy + part.y, part.id, overwriteRail, isBridgeBp)) built = true;
                     });
+                    
                     if (built) {
                         for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
+                        
+                        // Smart Bridge Logic: Auto-place rails on water neighbors
+                        if (this.activeBlueprint.special === 'bridge') {
+                            const neighbors = [
+                                {x:gx+1, y:gy}, {x:gx-1, y:gy},
+                                {x:gx, y:gy+1}, {x:gx, y:gy-1}
+                            ];
+                            neighbors.forEach(n => {
+                                if (this.world.getTile(n.x, n.y) === TILES.WATER.id) {
+                                    this.world.setTile(n.x, n.y, TILES.WOOD_RAIL.id);
+                                    this.spawnParticles(n.x * CONFIG.TILE_SIZE + 16, n.y * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 4);
+                                }
+                            });
+                        }
+
                         this.updateUI();
                         this.recalcCannons();
                     }
@@ -426,7 +466,8 @@ class Game {
             } else {
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
-                    if (this.tryBuild(gx, gy, id)) {
+                    // Single tile placement is never a bridge operation
+                    if (this.tryBuild(gx, gy, id, false, false)) {
                         consume(id, 1);
                         this.updateUI();
                         this.recalcCannons();
@@ -441,6 +482,12 @@ class Game {
                 let tx = gx, ty = gy;
                 let tileId = this.world.getTile(gx, gy);
                 
+                // RULE 2: Wood elements cannot be destroyed individually
+                if (tileId === TILES.WOOD_RAIL.id) {
+                     this.spawnText(mx * this.zoom, my * this.zoom, "BREAK ROAD TO DEMOLISH", "#f00");
+                     return;
+                }
+
                 if (!ID_TO_TILE[tileId].solid) {
                     let below = this.world.getTile(gx, gy + 1);
                     if ([12,14,15].includes(below)) { ty = gy + 1; tileId = below; }
@@ -451,7 +498,57 @@ class Game {
                 }
 
                 if (tileId !== TILES.GRASS.id && tileId !== TILES.WATER.id && tileId !== TILES.SAND.id) {
-                    this.world.setTile(tx, ty, TILES.GRASS.id);
+                    
+                    // RULE 1: Bridge cannot be removed if occupied
+                    // We must calculate ALL tiles that will be removed (The road + dependent rails)
+                    const tilesToRemove = [{x: tx, y: ty}];
+
+                    // Check for dependent rails that will collapse
+                    if (tileId === TILES.GREY.id) {
+                        const neighbors = [
+                            {x:tx+1, y:ty}, {x:tx-1, y:ty},
+                            {x:tx, y:ty+1}, {x:tx, y:ty-1}
+                        ];
+                        neighbors.forEach(n => {
+                            if (this.world.getTile(n.x, n.y) === TILES.WOOD_RAIL.id) {
+                                // Check if this rail has ANY OTHER grey neighbors besides the one we are breaking
+                                const railNeighbors = [
+                                    {x:n.x+1, y:n.y}, {x:n.x-1, y:n.y},
+                                    {x:n.x, y:n.y+1}, {x:n.x, y:n.y-1}
+                                ];
+                                const support = railNeighbors.some(rn => 
+                                    (rn.x !== tx || rn.y !== ty) && this.world.getTile(rn.x, rn.y) === TILES.GREY.id
+                                );
+                                if (!support) {
+                                    tilesToRemove.push({x: n.x, y: n.y});
+                                }
+                            }
+                        });
+                    }
+
+                    // Check Intersection against ALL entities
+                    const allEntities = [this.player, ...this.npcs];
+                    const isOccupied = tilesToRemove.some(t => {
+                        const tileCenter = {
+                            x: t.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, 
+                            y: t.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2
+                        };
+                        return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
+                    });
+
+                    if (isOccupied) {
+                        this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BREAK: OCCUPIED", "#f00");
+                        return;
+                    }
+
+                    // --- PROCEED WITH DESTRUCTION ---
+
+                    // Restore Water if the biome was originally water
+                    const biome = Utils.getBiome(tx, ty, this.world.seed);
+                    const restoreId = (biome === TILES.WATER.id) ? TILES.WATER.id : TILES.GRASS.id;
+
+                    this.world.setTile(tx, ty, restoreId);
+                    
                     if (!this.godMode) {
                         if ([12,14,15].includes(tileId)) {
                              this.player.inventory[TILES.GREY.id] += 4;
@@ -461,6 +558,18 @@ class Game {
                         }
                     }
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 5);
+                    
+                    // Collapse dependent rails (We already calculated them, but need to act now)
+                    tilesToRemove.forEach(t => {
+                        // Skip the main tile we just broke
+                        if (t.x === tx && t.y === ty) return;
+                        
+                        // Collapse Rail
+                        this.world.setTile(t.x, t.y, TILES.WATER.id);
+                        this.spawnParticles(t.x * CONFIG.TILE_SIZE + 16, t.y * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 4);
+                        if (!this.godMode) this.player.inventory[TILES.WOOD.id] += 1;
+                    });
+
                     this.recalcCannons();
                     this.updateUI();
                 }
@@ -468,7 +577,7 @@ class Game {
         }
     }
 
-    tryBuild(gx, gy, id) {
+    tryBuild(gx, gy, id, allowRailOverwrite = false, isBridge = false) {
         const tx = gx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2;
         const ty = gy * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2;
         
@@ -479,6 +588,16 @@ class Game {
         
         const current = this.world.getTile(gx, gy);
         if (current === id) return false;
+        
+        // STRICT RULE: Cannot build on Water unless it is part of a Bridge Blueprint
+        if (current === TILES.WATER.id && !isBridge) return false;
+        
+        // Special case: Allow overwriting rails if building a bridge/road
+        if (allowRailOverwrite && current === TILES.WOOD_RAIL.id) {
+            this.world.setTile(gx, gy, id);
+            return true;
+        }
+
         if (ID_TO_TILE[current].solid && current !== TILES.WATER.id) return false;
         
         this.world.setTile(gx, gy, id);
