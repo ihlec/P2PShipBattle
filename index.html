@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pixel Warfare Engine v2.8 (Flatland Spawns)</title>
+    <title>Pixel Warfare Engine v2.21 (Optimized Math)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Courier New', Courier, monospace; color: #eee; user-select: none; }
         canvas { display: block; image-rendering: pixelated; }
@@ -35,7 +35,8 @@
         <div class="stat-box">
             <div>Health: <span id="hp">100</span></div>
             <div>Pos: <span id="coords">0, 0</span></div>
-            <div>Seed: <span id="seed-disp"></span></div>
+            <div>Biome: <span id="biome-disp"></span></div>
+            <div>Elev: <span id="elev-disp"></span> | Seed: <span id="seed-disp"></span></div>
         </div>
         <div class="stat-box">
             <small>WASD: Move | Click: Build | R-Click: Break/Harvest</small>
@@ -58,7 +59,7 @@ const CONFIG = {
     TILE_SIZE: 32,
     PLAYER_SPEED_BASE: 4,
     PLAYER_SPEED_ROAD: 8,
-    NPC_SPAWN_RATE: 0.002, // REDUCED FROM 0.005
+    NPC_SPAWN_RATE: 0.002, 
     BUILD_RANGE: 400,
     MAX_NPCS: 30
 };
@@ -105,14 +106,18 @@ function toggleBlueprints() {
 }
 
 class Utils {
+    // OPTIMIZED HASH: Uses 32-bit integer multiplication for robust, uniform distribution
     static hash(x, y, seed) {
-        let h = seed + x * 374761393 + y * 668265263;
-        h = (h ^ (h >> 13)) * 1274126177;
-        return h ^ (h >> 16);
+        let h = seed ^ Math.imul(x, 374761393) ^ Math.imul(y, 668265263);
+        h = Math.imul(h ^ (h >>> 13), 1274126177);
+        return h ^ (h >>> 16);
     }
+    
     static noise(x, y, seed) {
         const s = Utils.hash(Math.floor(x), Math.floor(y), seed);
-        return (s & 0xFFFFFFFF) / 0xFFFFFFFF; 
+        // Unsigned shift (>>> 0) ensures positive integer range [0, 4294967295]
+        // Dividing by max uint32 gives strict [0.0, 1.0] range
+        return (s >>> 0) / 4294967296; 
     }
     
     static hsl(h, s, l, x, y, seed, hVar, lVar) {
@@ -122,29 +127,69 @@ class Utils {
         const newL = l + (r2 * lVar * 2) - lVar;
         return `hsl(${newH}, ${s}%, ${newL}%)`;
     }
+
+    static lerp(a, b, t) { return a + t * (b - a); }
+    static smoothstep(t) { return t * t * (3 - 2 * t); }
+
+    static valueNoise2D(x, y, seed) {
+        const iX = Math.floor(x);
+        const iY = Math.floor(y);
+        const fX = x - iX;
+        const fY = y - iY;
+        
+        const sX = Utils.smoothstep(fX);
+        const sY = Utils.smoothstep(fY);
+        
+        const n00 = Utils.noise(iX, iY, seed);
+        const n10 = Utils.noise(iX + 1, iY, seed);
+        const n01 = Utils.noise(iX, iY + 1, seed);
+        const n11 = Utils.noise(iX + 1, iY + 1, seed);
+        
+        const ix0 = Utils.lerp(n00, n10, sX);
+        const ix1 = Utils.lerp(n01, n11, sX);
+        
+        return Utils.lerp(ix0, ix1, sY);
+    }
     
     static getElevation(x, y, seed) {
-        const scale1 = 0.03;
-        const scale2 = 0.01;
-        let n = Math.sin(x * scale1 + seed) + Math.cos(y * scale1 + seed * 0.5) 
-              + Math.sin((x + y) * scale2 - seed) * 0.5;
-        n = n / 2.0; 
-        n += (Utils.noise(x, y, seed) - 0.5) * 0.1;
-        return n;
+        let amp = 1;
+        let freq = 0.01; 
+        let total = 0;
+        let maxAmp = 0;
+        
+        for(let i = 0; i < 4; i++) {
+            total += Utils.valueNoise2D(x * freq, y * freq, seed) * amp;
+            maxAmp += amp;
+            amp *= 0.5;
+            freq *= 2;
+        }
+        
+        // Normalized [0.0, 1.0]
+        const normalized = total / maxAmp;
+        
+        // Strict Mapping [-1.0, 1.0]. No biases.
+        return normalized * 2 - 1; 
     }
 
     static getBiome(x, y, seed) {
         const n = Utils.getElevation(x, y, seed);
 
-        if (n < -0.5) return TILES.DEEP_WATER.id;
-        if (n < -0.1) return TILES.WATER.id;
-        if (n < 0.0) return TILES.SAND.id; 
+        // --- CLEAN THRESHOLDS (Centered at 0.0) ---
         
-        if (n > 0.85) return TILES.MOUNTAIN.id; 
+        // Water < -0.25 means roughly 38% of map is water
+        if (n < -0.2) return TILES.DEEP_WATER.id;
+        if (n < 0.25) return TILES.WATER.id; 
+        if (n < 0.3) return TILES.SAND.id; // Thin beach (-0.25 to -0.15)
         
-        if (n > 0.35) {
+        // Land >= -0.15
+        
+        if (n > 0.6) return TILES.MOUNTAIN.id; // Peaks
+        
+        // Forest (0.15 to 0.6)
+        if (n > 0.45) {
             const tNoise = Utils.noise(x, y, seed + 999);
-            if (tNoise < 0.35) {
+            // 60% Density
+            if (tNoise < 0.6) {
                 const rockChance = Utils.noise(x, y, seed + 444);
                 if (rockChance < 0.02) return TILES.STONE_BLOCK.id;
                 return TILES.TREE.id;
@@ -152,15 +197,16 @@ class Utils {
             return TILES.GRASS.id; 
         }
         
+        // Plains (-0.15 to 0.15)
         const scattered = Utils.noise(x, y, seed + 888);
-        if (scattered < 0.02) {
+        if (scattered < 0.05) {
              const rockChance = Utils.noise(x, y, seed + 555);
-             if (rockChance < 0.05) return TILES.STONE_BLOCK.id;
+             if (rockChance < 0.1) return TILES.STONE_BLOCK.id;
              return TILES.TREE.id;
         }
 
         const rockNoise = Utils.noise(x, y, seed + 333);
-        if (rockNoise < 0.001) return TILES.STONE_BLOCK.id;
+        if (rockNoise < 0.005) return TILES.STONE_BLOCK.id;
 
         return TILES.GRASS.id;
     }
@@ -305,7 +351,9 @@ class Game {
             invBar: document.getElementById('inventory-bar'),
             bpMenu: document.getElementById('blueprint-menu'),
             activeBp: document.getElementById('active-bp-display'),
-            bpName: document.getElementById('current-bp-name')
+            bpName: document.getElementById('current-bp-name'),
+            elev: document.getElementById('elev-disp'),
+            biome: document.getElementById('biome-disp') 
         };
         
         this.dom.seed.innerText = this.world.seed;
@@ -409,14 +457,14 @@ class Game {
             const gx = Math.floor(x/CONFIG.TILE_SIZE);
             const gy = Math.floor(y/CONFIG.TILE_SIZE);
             const t = this.world.getTile(gx, gy);
-            if (!ID_TO_TILE[t].solid) return {x, y};
+            if (!ID_TO_TILE[t].solid && t !== TILES.WATER.id && t !== TILES.DEEP_WATER.id) return {x, y};
         }
         let r = 0;
         while (r < 100) {
             for (let x = -r; x <= r; x++) {
                 for (let y = -r; y <= r; y++) {
                     const t = this.world.getTile(x, y);
-                    if (!ID_TO_TILE[t].solid) {
+                    if (!ID_TO_TILE[t].solid && t !== TILES.WATER.id && t !== TILES.DEEP_WATER.id) {
                         return {x: x*CONFIG.TILE_SIZE, y: y*CONFIG.TILE_SIZE};
                     }
                 }
@@ -545,20 +593,15 @@ class Game {
                     if (tileId === TILES.TREE.id) {
                         this.world.setTile(tx, ty, TILES.GRASS.id);
                         this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
-                        
-                        // Dropping Wood (Guaranteed)
                         this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
                         
-                        // Rare chance for Greens (10%) instead of guaranteed
                         if (Math.random() < 0.1) {
                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
                         }
-                        
                         this.updateUI();
                         return;
                     }
 
-                    // --- HARVEST STONE MECHANIC ---
                     if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
                         const dmg = 20; 
                         const totalDmg = this.world.hitTile(tx, ty, dmg);
@@ -707,8 +750,8 @@ class Game {
 
     update(dt) {
         if (this.input.wheel !== 0) {
-            // FIX: Adjusted zoom out to 0.1 (5x more than original 0.5) instead of extreme 0.01
-            this.zoom = Math.max(0.1, Math.min(this.zoom - this.input.wheel * 0.001, 3));
+            // FIX: Allow zoom out to 0.05 to find land
+            this.zoom = Math.max(0.05, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
 
         this.regenTimer += dt;
@@ -836,8 +879,17 @@ class Game {
             return true;
         });
 
+        // DEBUG DISPLAY
         this.dom.hp.innerText = Math.floor(this.player.hp);
-        this.dom.coords.innerText = `${Math.floor(this.player.x/CONFIG.TILE_SIZE)}, ${Math.floor(this.player.y/CONFIG.TILE_SIZE)}`;
+        const px = Math.floor(this.player.x/CONFIG.TILE_SIZE);
+        const py = Math.floor(this.player.y/CONFIG.TILE_SIZE);
+        this.dom.coords.innerText = `${px}, ${py}`;
+        
+        // Show elevation and Biome Name
+        const currentElev = Utils.getElevation(px, py, this.world.seed);
+        const currentTileId = this.world.getTile(px, py);
+        this.dom.elev.innerText = currentElev.toFixed(2);
+        this.dom.biome.innerText = ID_TO_TILE[currentTileId].name;
         
         if (this.player.hp <= 0) location.reload();
         
