@@ -84,7 +84,8 @@ const TILES = {
     WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral' },
     TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
     MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt' },
-    GREENS: { id: 21, color: '#32CD32', solid: false, name: 'Greens', short: 'Grn' }
+    // UPDATE: Changed color to match GRASS (#2d6e32)
+    GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' }
 };
 
 const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
@@ -164,7 +165,7 @@ class Utils {
             freq *= 2;
         }
         
-        // Normalized [0.0, 1.0]
+        // Normalize to [0.0, 1.0]
         const normalized = total / maxAmp;
         
         // Strict Mapping [-1.0, 1.0]. No biases.
@@ -174,21 +175,20 @@ class Utils {
     static getBiome(x, y, seed) {
         const n = Utils.getElevation(x, y, seed);
 
-        // --- CLEAN THRESHOLDS (Centered at 0.0) ---
+        // --- USER CALIBRATED THRESHOLDS ---
         
-        // Water < -0.25 means roughly 38% of map is water
         if (n < -0.2) return TILES.DEEP_WATER.id;
         if (n < 0.25) return TILES.WATER.id; 
-        if (n < 0.3) return TILES.SAND.id; // Thin beach (-0.25 to -0.15)
+        if (n < 0.3) return TILES.SAND.id; 
         
-        // Land >= -0.15
+        // Land 
         
         if (n > 0.6) return TILES.MOUNTAIN.id; // Peaks
         
-        // Forest (0.15 to 0.6)
+        // Forest
         if (n > 0.45) {
             const tNoise = Utils.noise(x, y, seed + 999);
-            // 60% Density
+            // 60% Density in forest zones
             if (tNoise < 0.6) {
                 const rockChance = Utils.noise(x, y, seed + 444);
                 if (rockChance < 0.02) return TILES.STONE_BLOCK.id;
@@ -197,7 +197,7 @@ class Utils {
             return TILES.GRASS.id; 
         }
         
-        // Plains (-0.15 to 0.15)
+        // Plains
         const scattered = Utils.noise(x, y, seed + 888);
         if (scattered < 0.05) {
              const rockChance = Utils.noise(x, y, seed + 555);
@@ -451,27 +451,48 @@ class Game {
     }
 
     findSafeSpawn() {
-        for (let r = 0; r < 500; r++) {
-            const x = (Math.random() - 0.5) * 2000;
-            const y = (Math.random() - 0.5) * 2000;
+        // Helper: Check 5x5 area for water
+        const isSafe = (gx, gy) => {
+            // Check center first
+            const t = this.world.getTile(gx, gy);
+            if (ID_TO_TILE[t].solid || t === TILES.WATER.id || t === TILES.DEEP_WATER.id) return false;
+
+            // Check radius 2 (5x5 grid) for any water
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dy = -2; dy <= 2; dy++) {
+                    const nt = this.world.getTile(gx + dx, gy + dy);
+                    if (nt === TILES.WATER.id || nt === TILES.DEEP_WATER.id) return false;
+                }
+            }
+            return true;
+        };
+
+        // Attempt 1: Random Sampling (Fast)
+        for (let r = 0; r < 1000; r++) {
+            const x = (Math.random() - 0.5) * 5000; 
+            const y = (Math.random() - 0.5) * 5000;
             const gx = Math.floor(x/CONFIG.TILE_SIZE);
             const gy = Math.floor(y/CONFIG.TILE_SIZE);
-            const t = this.world.getTile(gx, gy);
-            if (!ID_TO_TILE[t].solid && t !== TILES.WATER.id && t !== TILES.DEEP_WATER.id) return {x, y};
+            
+            if (isSafe(gx, gy)) return {x, y};
         }
+        
+        // Attempt 2: Spiral Search Outward (Guaranteed)
         let r = 0;
-        while (r < 100) {
-            for (let x = -r; x <= r; x++) {
-                for (let y = -r; y <= r; y++) {
-                    const t = this.world.getTile(x, y);
-                    if (!ID_TO_TILE[t].solid && t !== TILES.WATER.id && t !== TILES.DEEP_WATER.id) {
-                        return {x: x*CONFIG.TILE_SIZE, y: y*CONFIG.TILE_SIZE};
-                    }
+        while (r < 500) { 
+            const points = [
+                {x: r, y: 0}, {x: -r, y: 0}, {x: 0, y: r}, {x: 0, y: -r},
+                {x: r, y: r}, {x: -r, y: -r}, {x: r, y: -r}, {x: -r, y: r}
+            ];
+            
+            for (let p of points) {
+                if (isSafe(p.x, p.y)) {
+                    return {x: p.x*CONFIG.TILE_SIZE, y: p.y*CONFIG.TILE_SIZE};
                 }
             }
             r++;
         }
-        return {x: 0, y: 0};
+        return {x: 0, y: 0}; 
     }
 
     // --- LOGIC ---
