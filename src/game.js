@@ -15,6 +15,8 @@ export default class Game {
         this.input = new InputHandler(this);
         this.world = new World();
         this.player = new Entity(0, 0, 'player');
+        
+        // --- MOVED SPAWN LOGIC HERE ---
         const spawn = this.findSafeSpawn();
         this.player.x = spawn.x; this.player.y = spawn.y;
 
@@ -150,17 +152,15 @@ export default class Game {
     findSafeSpawn() {
         const isSafe = (gx, gy) => {
             const t = this.world.getTile(gx, gy);
-            if (ID_TO_TILE[t].solid || t === TILES.WATER.id || t === TILES.DEEP_WATER.id) return false;
-            for (let dx = -2; dx <= 2; dx++) {
-                for (let dy = -2; dy <= 2; dy++) {
-                    const nt = this.world.getTile(gx + dx, gy + dy);
-                    if (nt === TILES.WATER.id || nt === TILES.DEEP_WATER.id) return false;
-                }
-            }
-            return true;
+            
+            // --- MODIFIED SPAWN LOGIC ---
+            // Only check if the tile is SAND.
+            // We removed the "radius check for water" because Sand is always next to water.
+            return t === TILES.SAND.id;
         };
 
-        for (let r = 0; r < 1000; r++) {
+        // Attempt 1: Random Sampling (Fast)
+        for (let r = 0; r < 2000; r++) { // Increased attempts slightly since Sand is rare
             const x = (Math.random() - 0.5) * 5000; 
             const y = (Math.random() - 0.5) * 5000;
             const gx = Math.floor(x/CONFIG.TILE_SIZE);
@@ -168,8 +168,9 @@ export default class Game {
             if (isSafe(gx, gy)) return {x, y};
         }
         
+        // Attempt 2: Spiral Search Outward (Guaranteed)
         let r = 0;
-        while (r < 500) { 
+        while (r < 1000) { 
             const points = [{x: r, y: 0}, {x: -r, y: 0}, {x: 0, y: r}, {x: 0, y: -r}, {x: r, y: r}, {x: -r, y: -r}, {x: r, y: -r}, {x: -r, y: r}];
             for (let p of points) {
                 if (isSafe(p.x, p.y)) return {x: p.x*CONFIG.TILE_SIZE, y: p.y*CONFIG.TILE_SIZE};
@@ -456,6 +457,9 @@ export default class Game {
         if (dx || dy) {
             const len = Math.sqrt(dx*dx + dy*dy);
             this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
+        } else {
+             // FIX: If no movement keys are pressed, move(0,0) ensures player.direction is reset to {x:0, y:0}
+             this.player.move(0, 0, this.world);
         }
 
         const viewW = this.canvas.width / this.zoom;
@@ -788,8 +792,109 @@ export default class Game {
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else {
-                        this.ctx.fillStyle = obj._type === 'player' ? '#ff0000' : '#aa0000';
-                        this.ctx.fillRect(obj.x - 16, obj.y - 16, 32, 32);
+                        const isPlayer = obj._type === 'player';
+                        const colorShirt = isPlayer ? '#3498db' : '#993333'; // Blue for Player, Dark Red for NPC
+                        const colorPants = isPlayer ? '#8B4513' : '#654321'; // Brown Pants
+                        const colorSkin = isPlayer ? '#ffcc99' : '#e0b090'; // Skin Tone
+                        const colorHelmet = '#8B6F43'; // Darker Brown
+                        const colorBoots = '#333333'; // Black/Dark Grey
+
+                        // Get the player's stored direction
+                        const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 }; // NPCs always face down for simplicity
+                        
+                        // Movement for animation (Wiggle)
+                        const w = Math.cos(Date.now() / 100) * 2;
+                        const w2 = Math.cos(Date.now() / 100 + Math.PI) * 2;
+                        
+                        // Determine if the entity is moving (checking if direction is non-zero)
+                        const moving = isPlayer && (Math.abs(dir.x) > 0.01 || Math.abs(dir.y) > 0.01);
+                        
+                        // Feet/Hand animation offsets
+                        const wiggleX = moving ? w : 0;
+                        const wiggleX2 = moving ? w2 : 0;
+                        
+                        // Hand animation: shift inward on sideways movement
+                        let handShift = 0;
+                        // Only shift hands if moving predominantly sideways
+                        if (isPlayer && Math.abs(dir.x) > Math.abs(dir.y) && moving) handShift = Math.sign(dir.x) * 4;
+
+                        // --- DRAWING ---
+
+                        // 1. FEET/BOOTS (Wiggle only when moving)
+                        this.ctx.fillStyle = colorBoots;
+                        this.ctx.fillRect(obj.x - 8 + wiggleX, obj.y + 12, 4, 4);  // Left Foot
+                        this.ctx.fillRect(obj.x + 4 + wiggleX2, obj.y + 12, 4, 4); // Right Foot
+
+                        // 2. LEGS (Pants)
+                        this.ctx.fillStyle = colorPants;
+                        this.ctx.fillRect(obj.x - 8, obj.y + 4, 16, 8); 
+
+                        // 3. BODY (Shirt/Tunic)
+                        this.ctx.fillStyle = colorShirt;
+                        this.ctx.fillRect(obj.x - 8, obj.y - 8, 16, 16); 
+                        
+                        // 4. HANDS/ARMS (Shift inward on side movement)
+                        this.ctx.fillStyle = colorSkin;
+                        if (handShift > 0) {
+                            // Moving Right: Left hand moves in
+                            this.ctx.fillRect(obj.x - 12 + handShift, obj.y - 4, 4, 4); // Left Hand (shifted right)
+                            this.ctx.fillRect(obj.x + 8, obj.y - 4, 4, 4);           // Right Hand (unaffected)
+                        } else if (handShift < 0) {
+                            // Moving Left: Right hand moves in
+                            this.ctx.fillRect(obj.x - 12, obj.y - 4, 4, 4);          // Left Hand (unaffected)
+                            this.ctx.fillRect(obj.x + 8 + handShift, obj.y - 4, 4, 4); // Right Hand (shifted left)
+                        } else {
+                            // Moving Up/Down or Stationary: Hands out
+                            this.ctx.fillRect(obj.x - 12, obj.y - 4, 4, 4); // Left Hand
+                            this.ctx.fillRect(obj.x + 8, obj.y - 4, 4, 4);  // Right Hand
+                        }
+
+                        // NEW SIZE: HEAD (12x12 instead of 8x8)
+                        const HEAD_SIZE = 12;
+                        const HEAD_Y = obj.y - 20; // Shift up to accommodate larger size
+                        
+                        this.ctx.fillStyle = colorSkin;
+                        this.ctx.fillRect(obj.x - HEAD_SIZE/2, HEAD_Y, HEAD_SIZE, HEAD_SIZE); 
+
+                        // NEW SIZE: HELMET/HAT (14x8)
+                        const HELMET_Y = HEAD_Y - 4;
+                        this.ctx.fillStyle = colorHelmet;
+                        this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HELMET_Y, HEAD_SIZE + 2, 6); 
+
+                        // NEW SIZE: EYES (3x3 instead of 2x2, adjusted position)
+                        const EYE_SIZE = 3;
+                        const EYE_Y = HEAD_Y + 3; // Centered vertically in new head
+                        
+                        // Default Eye Position (Facing Down/South)
+                        let eyeX1 = obj.x - 5;
+                        let eyeX2 = obj.x + 2;
+                        let eyeDrawnSize = EYE_SIZE;
+
+                        if (Math.abs(dir.y) > Math.abs(dir.x) || !moving) {
+                            // Moving Up/Down or Stationary (Y is dominant/static)
+                            if (dir.y < 0 && moving) { // Upwards (North): Hide eyes
+                                eyeDrawnSize = 0;
+                            } else { // Downwards (South) or Stationary: Eyes centered
+                                eyeDrawnSize = EYE_SIZE;
+                            }
+                        } else if (Math.abs(dir.x) > Math.abs(dir.y)) {
+                            // Moving Left or Right (X is dominant)
+                            if (dir.x < 0) { // Left (West): Eyes shift to left side of face
+                                eyeX1 = obj.x - 5; // Left eye visible
+                                eyeX2 = obj.x - 2; // Right eye shifts to center
+                            } else { // Right (East): Eyes shift to right side of face
+                                eyeX1 = obj.x + 2; // Right eye visible
+                                eyeX2 = obj.x - 1; // Left eye shifts to center
+                            }
+                        }
+
+                        // Draw the visible eyes
+                        if (eyeDrawnSize > 0) {
+                            this.ctx.fillStyle = '#000000';
+                            this.ctx.fillRect(eyeX1, EYE_Y, eyeDrawnSize, eyeDrawnSize);
+                            this.ctx.fillRect(eyeX2, EYE_Y, eyeDrawnSize, eyeDrawnSize);
+                        }
+
                         this.drawHealth(obj._orig); 
                     }
                 });

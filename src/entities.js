@@ -23,6 +23,7 @@ export class Entity {
         this.damageBuffer = 0;
         this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0 };
         this.selectedTile = TILES.GREY.id;
+        this.direction = { x: 0, y: 1 }; // Initialize direction
     }
     
     move(dx, dy, world) {
@@ -35,8 +36,19 @@ export class Entity {
             return true;
         };
         
-        if (check(this.x + dx, this.y)) this.x += dx;
-        if (check(this.x, this.y + dy)) this.y += dy;
+        // Store requested positions before potential collision check modifications
+        const attemptedX = this.x + dx;
+        const attemptedY = this.y + dy;
+
+        if (check(attemptedX, this.y)) this.x = attemptedX;
+        if (check(this.x, attemptedY)) this.y = attemptedY;
+
+        // Update direction only if there was a requested movement (dx != 0 or dy != 0)
+        // or if the movement was explicitly zero (to handle the stationary fix in game.js)
+        if (dx !== 0 || dy !== 0 || (dx === 0 && dy === 0 && this.type === 'player')) {
+            // Normalize direction if moving, or explicitly set to 0,0 if stationary
+            this.direction = (dx === 0 && dy === 0) ? { x: 0, y: 0 } : { x: dx, y: dy };
+        }
 
         const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
         const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
