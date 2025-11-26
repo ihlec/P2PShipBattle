@@ -1,0 +1,43 @@
+export const CONFIG = {
+    TILE_SIZE: 32,
+    PLAYER_SPEED_BASE: 4,
+    PLAYER_SPEED_ROAD: 8,
+    NPC_SPAWN_RATE: 0.002, 
+    BUILD_RANGE: 400,
+    MAX_NPCS: 30
+};
+
+export const TILES = {
+    WATER: { id: 0, color: '#2b2b96', solid: true, name: 'Ocean', short: 'H2O' },
+    DEEP_WATER: { id: 18, color: '#1a1a6e', solid: true, name: 'Deep Ocean', short: 'D.H2O' },
+    GRASS: { id: 1, color: '#2d6e32', solid: false, name: 'Grass', short: 'Grs' },
+    SAND:  { id: 2, color: '#c2b280', solid: false, name: 'Sand', short: 'Snd' },
+    GREY:  { id: 3, color: '#777777', solid: false, name: 'Stone/Road', short: 'Stn' },
+    BLACK: { id: 4, color: '#111111', solid: false, name: 'Obsidian', short: 'Obs' }, 
+    IRON:  { id: 5, color: '#444444', solid: false, name: 'Iron', short: 'Irn' }, 
+    GOLD:  { id: 7, color: '#ffd700', solid: false, name: 'Gold', short: 'Gld' },
+    WALL:  { id: 9, color: '#555555', solid: true, name: 'Wall', short: 'Wal' },
+    WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
+    STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Boulder', short: 'Bld' }, 
+    TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St' },
+    TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir' },
+    TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd' },
+    ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' },
+    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal' },
+    WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral' },
+    TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
+    MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt' },
+    GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' }
+};
+
+export const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
+
+export const BLUEPRINTS = [
+    { name: "Stone Tower", structure: [{x:0, y:0, id: TILES.TOWER_BASE_STONE.id}], cost: { [TILES.GREY.id]: 4, [TILES.WOOD.id]: 1 } },
+    { name: "Iron Tower", structure: [{x:0, y:0, id: TILES.TOWER_BASE_IRON.id}], cost: { [TILES.GREY.id]: 1, [TILES.IRON.id]: 3, [TILES.WOOD.id]: 1 } },
+    { name: "Gold Tower", structure: [{x:0, y:0, id: TILES.TOWER_BASE_GOLD.id}], cost: { [TILES.GREY.id]: 1, [TILES.GOLD.id]: 3, [TILES.WOOD.id]: 1 } },
+    { name: "Stone Wall", structure: [{x:0, y:0, id: TILES.WALL.id}], cost: { [TILES.GREY.id]: 2 } },
+    { name: "Wood Wall", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
+    { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
+    { name: "Road Segment", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1 } }
+];
