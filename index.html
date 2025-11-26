@@ -159,7 +159,15 @@ const TILES = {
     // NEW TILES
     WALL:  { id: 9, color: '#777777', solid: true, name: 'Wall', short: 'Wal' },
     WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
-    STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Stone Block', short: 'StB' } // For Cannon Barrel
+    // Stone Block/Roof are now primarily visual helpers, not grid blockers
+    STONE_BLOCK: { id: 11, color: '#777777', solid: false, name: 'Stone Block', short: 'StB' }, 
+    
+    // SPLIT BASES to store type in single tile
+    TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St' },
+    TOWER_BASE_IRON:  { id: 14, color: '#555555', solid: true, name: 'Iron Tower', short: 'T.Ir' },
+    TOWER_BASE_GOLD:  { id: 15, color: '#555555', solid: true, name: 'Gold Tower', short: 'T.Gd' },
+    
+    ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' }
 };
 
 const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
@@ -167,30 +175,21 @@ const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; retu
 // --- BLUEPRINT DEFINITIONS ---
 const BLUEPRINTS = [
     {
-        name: "Stone Cannon",
-        // Structure: Wood Base, Stone Barrel (Now using STONE_BLOCK for correct 3D look)
-        structure: [
-            {x:0, y:0, id: TILES.WOOD.id}, 
-            {x:0, y:-1, id: TILES.STONE_BLOCK.id} 
-        ],
-        // Cost: 1 Wood + 3 Stone
-        cost: { [TILES.WOOD.id]: 1, [TILES.GREY.id]: 3 }
+        name: "Stone Tower",
+        // Structure: JUST THE BASE (1 Tile). Visuals are projected upwards.
+        structure: [ {x:0, y:0, id: TILES.TOWER_BASE_STONE.id} ],
+        // Cost: 1 Base Stone (Grey) + 3 Stone Barrel + 1 Wood Roof
+        cost: { [TILES.GREY.id]: 4, [TILES.WOOD.id]: 1 }
     },
     {
-        name: "Iron Cannon",
-        structure: [
-            {x:0, y:0, id: TILES.WOOD.id},
-            {x:0, y:-1, id: TILES.IRON.id}
-        ],
-        cost: { [TILES.WOOD.id]: 1, [TILES.IRON.id]: 3 }
+        name: "Iron Tower",
+        structure: [ {x:0, y:0, id: TILES.TOWER_BASE_IRON.id} ],
+        cost: { [TILES.GREY.id]: 1, [TILES.IRON.id]: 3, [TILES.WOOD.id]: 1 }
     },
     {
-        name: "Gold Cannon",
-        structure: [
-            {x:0, y:0, id: TILES.WOOD.id},
-            {x:0, y:-1, id: TILES.GOLD_2.id}
-        ],
-        cost: { [TILES.WOOD.id]: 1, [TILES.GOLD_2.id]: 3 }
+        name: "Gold Tower",
+        structure: [ {x:0, y:0, id: TILES.TOWER_BASE_GOLD.id} ],
+        cost: { [TILES.GREY.id]: 1, [TILES.GOLD_2.id]: 3, [TILES.WOOD.id]: 1 }
     },
     {
         name: "Stone Wall",
@@ -319,7 +318,6 @@ class DamageText {
     constructor(x, y, amount, color) {
         this.x = x;
         this.y = y;
-        // FIX: Only apply Math.floor if amount is a number. Allow strings for Loot/Reloads.
         this.amount = (typeof amount === 'number') ? Math.floor(amount) : amount;
         this.color = color;
         this.life = 60; 
@@ -331,7 +329,7 @@ class DamageText {
     }
 }
 
-// NEW: Loot Item Class
+// Loot Item Class
 class Loot {
     constructor(x, y, id, qty) {
         this.x = x; 
@@ -579,27 +577,25 @@ class Game {
         for(let y = py - radius; y < py + radius; y++) {
             for(let x = px - radius; x < px + radius; x++) {
                 const baseId = this.world.getTile(x, y);
-                const topId = this.world.getTile(x, y - 1);
                 
-                if (baseId === TILES.WOOD.id) {
-                    let damage = 0;
-                    if (topId === TILES.STONE_BLOCK.id) damage = 20;
-                    else if (topId === TILES.IRON.id) damage = 40;
-                    else if (topId === TILES.GOLD_2.id) damage = 80;
+                // TOWER LOGIC: Check Single Tile Type
+                let damage = 0;
+                if (baseId === TILES.TOWER_BASE_STONE.id) damage = 20;
+                else if (baseId === TILES.TOWER_BASE_IRON.id) damage = 40;
+                else if (baseId === TILES.TOWER_BASE_GOLD.id) damage = 80;
 
-                    if (damage > 0) {
-                        const key = `${x},${y}`;
-                        const prev = this.cannons.find(c => c.key === key);
-                        nextCannons.push({
-                            key: key,
-                            x: (x * TILE_SIZE) + (TILE_SIZE/2),
-                            y: ((y - 1) * TILE_SIZE) + (TILE_SIZE/2), 
-                            damage: damage,
-                            cooldown: prev ? prev.cooldown : 0,
-                            range: 300,
-                            ammo: prev ? prev.ammo : 0
-                        });
-                    }
+                if (damage > 0) {
+                    const key = `${x},${y}`;
+                    const prev = this.cannons.find(c => c.key === key);
+                    nextCannons.push({
+                        key: key,
+                        x: (x * TILE_SIZE) + (TILE_SIZE/2),
+                        y: ((y - 1) * TILE_SIZE) + (TILE_SIZE/2), // Fire from Virtual Middle
+                        damage: damage,
+                        cooldown: prev ? prev.cooldown : 0,
+                        range: 300,
+                        ammo: prev ? prev.ammo : 0
+                    });
                 }
             }
         }
@@ -620,16 +616,30 @@ class Game {
 
     // Check if a specific tile grid coordinate is occupied by an entity
     isTileOccupiedByEntity(gx, gy) {
+        // Tile Bounds
+        const tx = gx * TILE_SIZE;
+        const ty = gy * TILE_SIZE;
+        const ts = TILE_SIZE;
+
+        // Helper: Check intersection with an entity's hitbox
+        // Entity hitbox is approx 24x24 (radius 12 from center)
+        const checkOverlap = (e) => {
+            const halfSize = 12; 
+            const ex = e.x - halfSize;
+            const ey = e.y - halfSize;
+            const es = halfSize * 2;
+
+            // AABB Intersection Test
+            return (ex < tx + ts && ex + es > tx &&
+                    ey < ty + ts && ey + es > ty);
+        };
+
         // Check Player
-        const px = Math.floor(this.player.x / TILE_SIZE);
-        const py = Math.floor(this.player.y / TILE_SIZE);
-        if (px === gx && py === gy) return true;
+        if (checkOverlap(this.player)) return true;
 
         // Check NPCs
         for(let npc of this.npcs) {
-            const nx = Math.floor(npc.x / TILE_SIZE);
-            const ny = Math.floor(npc.y / TILE_SIZE);
-            if (nx === gx && ny === gy) return true;
+            if (checkOverlap(npc)) return true;
         }
         return false;
     }
@@ -646,6 +656,10 @@ class Game {
                 this.world.setTile(gx, gy, TILES.WALL.id);
                 return;
             }
+            
+            // FIX: Prevent overwriting existing structures with blueprints
+            if (isOccupied) return;
+
             if (id !== currentId) {
                  this.world.setTile(gx, gy, id);
             }
@@ -702,30 +716,25 @@ class Game {
             const gx = Math.floor(mx / TILE_SIZE);
             const gy = Math.floor(my / TILE_SIZE);
 
-            // RESTRICTION: Range Check
             const distToMouse = Math.sqrt(Math.pow(this.player.x - mx, 2) + Math.pow(this.player.y - my, 2));
             const inRange = distToMouse <= BUILD_RANGE;
 
             if (inRange) {
                 if(this.input.mouse.left) {
                     // MANUAL CANNON RELOAD
-                    // Check if clicking on a cannon with IRON selected
                     if (this.player.selectedTile === TILES.IRON.id) {
-                        // Clicked near a cannon base or top?
                         const clickedCannon = this.cannons.find(c => {
-                            // Check dist to cannon top
                             const dc = Math.sqrt(Math.pow(c.x - mx, 2) + Math.pow(c.y - my, 2));
                             return dc < TILE_SIZE * 1.5;
                         });
 
                         if (clickedCannon) {
-                            // Reload Logic
                             if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
                                 if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
                                 clickedCannon.ammo += 5;
                                 this.spawnDamageText(clickedCannon.x, clickedCannon.y, "+5 AMMO", "#00ffff");
-                                this.input.mouse.left = false; // Consume click
-                                return; // Don't place block
+                                this.input.mouse.left = false; 
+                                return; 
                             }
                         }
                     }
@@ -785,18 +794,68 @@ class Game {
                         this.updateBPDisplay();
                         this.updateUIHighlight();
                     } else {
-                        const current = this.world.getTile(gx, gy);
+                        // TOWER DESTRUCTION LOGIC (Virtual Detection)
+                        // Check if we clicked the Base, OR the virtual space above it (y+1 or y+2 relative to base)
                         
-                        if (current === TILES.WALL.id) {
-                            this.world.setTile(gx, gy, TILES.GREY.id);
-                            this.player.inventory[TILES.GREY.id]++;
-                            this.scanForCannons();
+                        // Scan neighborhood for a base that "owns" this tile
+                        let baseGx = gx;
+                        let baseY = -1;
+                        let foundTowerId = -1;
+
+                        // 1. Direct Click on Base
+                        let tid = this.world.getTile(gx, gy);
+                        if (tid === TILES.TOWER_BASE_STONE.id || tid === TILES.TOWER_BASE_IRON.id || tid === TILES.TOWER_BASE_GOLD.id) {
+                            baseY = gy;
+                            foundTowerId = tid;
                         }
-                        else if(current !== TILES.GRASS.id && current !== TILES.WATER.id && current !== TILES.SAND.id) {
-                            this.world.setTile(gx, gy, TILES.GRASS.id); 
-                            if(!this.player.inventory[current]) this.player.inventory[current] = 0;
-                            this.player.inventory[current]++;
+                        // 2. Clicked "Mid" (y-1 relative to base, so look at gy+1)
+                        else {
+                            let below = this.world.getTile(gx, gy + 1);
+                            if (below === TILES.TOWER_BASE_STONE.id || below === TILES.TOWER_BASE_IRON.id || below === TILES.TOWER_BASE_GOLD.id) {
+                                baseY = gy + 1;
+                                foundTowerId = below;
+                            } 
+                            // 3. Clicked "Top" (y-2 relative to base, so look at gy+2)
+                            else {
+                                let below2 = this.world.getTile(gx, gy + 2);
+                                if (below2 === TILES.TOWER_BASE_STONE.id || below2 === TILES.TOWER_BASE_IRON.id || below2 === TILES.TOWER_BASE_GOLD.id) {
+                                    baseY = gy + 2;
+                                    foundTowerId = below2;
+                                }
+                            }
+                        }
+
+                        if (foundTowerId !== -1) {
+                            // Destroy Base Only (Upper parts are virtual)
+                            this.world.setTile(baseGx, baseY, TILES.GRASS.id);
+
+                            // Refund
+                            if (!this.godMode) {
+                                this.player.inventory[TILES.GREY.id] += 1; // Base Refund
+                                this.player.inventory[TILES.WOOD.id] += 1; // Roof Refund
+                                
+                                if (foundTowerId === TILES.TOWER_BASE_STONE.id) this.player.inventory[TILES.GREY.id] += 3; 
+                                else if (foundTowerId === TILES.TOWER_BASE_IRON.id) this.player.inventory[TILES.IRON.id] += 3;
+                                else if (foundTowerId === TILES.TOWER_BASE_GOLD.id) this.player.inventory[TILES.GOLD_2.id] += 3;
+                            }
+
                             this.scanForCannons();
+                        } 
+                        else {
+                            // Normal Break Logic
+                            const current = this.world.getTile(gx, gy);
+                            
+                            if (current === TILES.WALL.id) {
+                                this.world.setTile(gx, gy, TILES.GREY.id);
+                                this.player.inventory[TILES.GREY.id]++;
+                                this.scanForCannons();
+                            }
+                            else if(current !== TILES.GRASS.id && current !== TILES.WATER.id && current !== TILES.SAND.id) {
+                                this.world.setTile(gx, gy, TILES.GRASS.id); 
+                                if(!this.player.inventory[current]) this.player.inventory[current] = 0;
+                                this.player.inventory[current]++;
+                                this.scanForCannons();
+                            }
                         }
                     }
                 }
@@ -810,12 +869,10 @@ class Game {
             if (item.pickedUp) return;
             const d = Utils.distance(this.player, item);
             if (d < TILE_SIZE) {
-                // Pick up
                 if(!this.player.inventory[item.id]) this.player.inventory[item.id] = 0;
                 this.player.inventory[item.id] += item.qty;
                 item.pickedUp = true;
                 
-                // FIX: Randomize text position slightly to prevent overlap when picking up stack
                 const tx = this.player.x + (Math.random() - 0.5) * 40;
                 const ty = this.player.y - 40 + (Math.random() - 0.5) * 20;
                 this.spawnDamageText(tx, ty, `+${item.qty} ${ID_TO_TILE[item.id].short}`, "#ffff00");
@@ -882,18 +939,11 @@ class Game {
 
                 if(npc.hp <= 0) {
                     npc.dead = true;
-                    // DROP LOOT - FIX: ADD SPREAD
                     const spread = 24;
-                    
-                    // Black x2
                     this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.BLACK.id, 2));
-                    
-                    // Random Gold
                     if(Math.random() > 0.5) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_1.id, 1));
                     if(Math.random() > 0.8) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_2.id, 1));
                     if(Math.random() > 0.95) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_3.id, 1));
-                    
-                    // Iron
                     this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.IRON.id, 5));
                 }
             }
@@ -902,17 +952,6 @@ class Game {
         this.cannons.forEach(cannon => {
             if(cannon.cooldown > 0) cannon.cooldown--;
             else {
-                // AUTO RELOAD REMOVED as per request
-                /*
-                if (cannon.ammo <= 0) {
-                    if (this.player.inventory[TILES.IRON.id] > 0) {
-                        this.player.inventory[TILES.IRON.id]--;
-                        cannon.ammo += 5; 
-                        this.spawnDamageText(cannon.x, cannon.y, "RELOAD", "#00ffff");
-                    }
-                }
-                */
-
                 if(cannon.ammo > 0) {
                     let target = null;
                     let minDist = cannon.range;
@@ -946,9 +985,7 @@ class Game {
                     }
                     if(npc.hp <= 0) {
                         npc.dead = true;
-                        // DROP LOOT - FIX: ADD SPREAD
                         const spread = 24;
-                        
                         this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.BLACK.id, 2));
                         if(Math.random() > 0.5) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_1.id, 1));
                         if(Math.random() > 0.8) this.lootItems.push(new Loot(npc.x + (Math.random()-0.5)*spread, npc.y + (Math.random()-0.5)*spread, TILES.GOLD_2.id, 1));
@@ -1012,31 +1049,28 @@ class Game {
         const startRow = Math.floor(this.camera.y / TILE_SIZE);
         const endRow = startRow + (viewH / TILE_SIZE) + 1;
 
+        // PASS 1: Draw Ground & Standard Objects
         for (let c = startCol; c <= endCol; c++) {
             for (let r = startRow; r <= endRow; r++) {
                 const id = this.world.getTile(c, r);
                 const tile = ID_TO_TILE[id];
                 if (tile) {
                     this.ctx.fillStyle = tile.color;
-                    
                     const tx = Math.floor(c * TILE_SIZE - this.camera.x);
                     const ty = Math.floor(r * TILE_SIZE - this.camera.y);
 
                     this.ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
                     
-                    // RENDER SHADOWS FOR BLOCKS
-                    if (id === TILES.WALL.id || id === TILES.WOOD.id || id === TILES.STONE_BLOCK.id ||
-                        id === TILES.IRON.id || id === TILES.GOLD_1.id || id === TILES.GOLD_2.id || 
-                        id === TILES.GOLD_3.id || id === TILES.BLACK.id) {
+                    // RENDER SHADOWS (For Base layers)
+                    if (id === TILES.WALL.id || id === TILES.WOOD.id || id === TILES.BLACK.id || 
+                        id === TILES.TOWER_BASE_STONE.id || id === TILES.TOWER_BASE_IRON.id || id === TILES.TOWER_BASE_GOLD.id) {
                          
                          this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                         this.ctx.fillRect(tx, ty + TILE_SIZE - 6, TILE_SIZE, 6); // Bottom
-                         this.ctx.fillRect(tx + TILE_SIZE - 6, ty, 6, TILE_SIZE); // Right
-                         
+                         this.ctx.fillRect(tx, ty + TILE_SIZE - 6, TILE_SIZE, 6); 
+                         this.ctx.fillRect(tx + TILE_SIZE - 6, ty, 6, TILE_SIZE); 
                          this.ctx.fillStyle = 'rgba(255,255,255,0.2)';
-                         this.ctx.fillRect(tx, ty, TILE_SIZE, 4); // Top
-                         this.ctx.fillRect(tx, ty, 4, TILE_SIZE); // Left
-                         
+                         this.ctx.fillRect(tx, ty, TILE_SIZE, 4); 
+                         this.ctx.fillRect(tx, ty, 4, TILE_SIZE); 
                          this.ctx.fillStyle = tile.color;
                          this.ctx.fillRect(tx + 4, ty + 4, TILE_SIZE - 10, TILE_SIZE - 10);
                     }
@@ -1044,6 +1078,7 @@ class Game {
             }
         }
 
+        // GHOST BLUEPRINT
         if (this.activeBlueprint) {
             const mx = (this.input.mouse.x / this.zoom) + this.camera.x;
             const my = (this.input.mouse.y / this.zoom) + this.camera.y;
@@ -1059,20 +1094,33 @@ class Game {
                     Math.floor((gy + part.y) * TILE_SIZE - this.camera.y),
                     TILE_SIZE, TILE_SIZE
                 );
+                // Render visual parts for towers in blueprint too
+                if (part.id === TILES.TOWER_BASE_STONE.id || part.id === TILES.TOWER_BASE_IRON.id || part.id === TILES.TOWER_BASE_GOLD.id) {
+                    // Draw Roof and Mid for preview
+                    this.ctx.fillStyle = '#555'; // Generic Barrel
+                    this.ctx.fillRect(
+                        Math.floor((gx + part.x) * TILE_SIZE - this.camera.x),
+                        Math.floor((gy + part.y - 1) * TILE_SIZE - this.camera.y),
+                        TILE_SIZE, TILE_SIZE
+                    );
+                    this.ctx.fillStyle = '#5C3317'; // Roof
+                    this.ctx.fillRect(
+                        Math.floor((gx + part.x) * TILE_SIZE - this.camera.x),
+                        Math.floor((gy + part.y - 2) * TILE_SIZE - this.camera.y),
+                        TILE_SIZE, TILE_SIZE
+                    );
+                }
             });
             this.ctx.globalAlpha = 1.0;
         }
 
-        // RENDER LOOT
+        // PASS 2: Draw Entities
         this.lootItems.forEach(item => {
             const tile = ID_TO_TILE[item.id];
             const lx = item.x - this.camera.x;
-            // Bob animation
             const bob = Math.sin((Date.now() / 200) + item.bobOffset) * 3;
             const ly = item.y - this.camera.y + bob;
-            
             this.ctx.fillStyle = tile.color;
-            // Small Item Box
             this.ctx.fillRect(lx - 6, ly - 6, 12, 12);
             this.ctx.strokeStyle = '#fff';
             this.ctx.strokeRect(lx - 6, ly - 6, 12, 12);
@@ -1107,6 +1155,72 @@ class Game {
             this.ctx.fillStyle = p.color;
             this.ctx.fillRect(p.x - this.camera.x, p.y - this.camera.y, 4, 4);
         });
+
+        // PASS 3: Draw Overhead (Virtual) Tiles
+        // We scan for Tower Bases, then draw the barrel/roof above them.
+        for (let c = startCol; c <= endCol; c++) {
+            for (let r = startRow; r <= endRow; r++) {
+                const id = this.world.getTile(c, r);
+                
+                if (id === TILES.TOWER_BASE_STONE.id || id === TILES.TOWER_BASE_IRON.id || id === TILES.TOWER_BASE_GOLD.id) {
+                    const tx = Math.floor(c * TILE_SIZE - this.camera.x);
+                    const ty = Math.floor(r * TILE_SIZE - this.camera.y);
+
+                    // --- RENDER MIDDLE (Barrel) ---
+                    const midY = ty - TILE_SIZE;
+                    const midGridY = r - 1;
+                    
+                    // Check transparency for Mid
+                    let midAlpha = 1.0;
+                    const midTile = this.world.getTile(c, midGridY);
+                    // If tile is occupied by a Wall (>2) or Entity -> Transparent
+                    if (midTile > 2 || this.isTileOccupiedByEntity(c, midGridY)) midAlpha = 0.5;
+                    
+                    this.ctx.globalAlpha = midAlpha;
+                    
+                    // Select Color based on base type
+                    let barrelColor = TILES.STONE_BLOCK.color;
+                    if (id === TILES.TOWER_BASE_IRON.id) barrelColor = TILES.IRON.color;
+                    if (id === TILES.TOWER_BASE_GOLD.id) barrelColor = TILES.GOLD_2.color;
+
+                    this.ctx.fillStyle = barrelColor;
+                    this.ctx.fillRect(tx, midY, TILE_SIZE, TILE_SIZE);
+                    // Shadows
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                    this.ctx.fillRect(tx, midY + TILE_SIZE - 6, TILE_SIZE, 6); 
+                    this.ctx.fillRect(tx + TILE_SIZE - 6, midY, 6, TILE_SIZE); 
+                    this.ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                    this.ctx.fillRect(tx, midY, TILE_SIZE, 4); 
+                    this.ctx.fillRect(tx, midY, 4, TILE_SIZE); 
+                    this.ctx.fillStyle = barrelColor;
+                    this.ctx.fillRect(tx + 4, midY + 4, TILE_SIZE - 10, TILE_SIZE - 10);
+                    // Muzzle
+                    this.ctx.fillStyle = '#111'; 
+                    this.ctx.fillRect(tx + 10, midY + 10, 12, 12);
+
+                    // --- RENDER TOP (Roof) ---
+                    const topY = ty - (TILE_SIZE * 2);
+                    const topGridY = r - 2;
+                    
+                    let topAlpha = 1.0;
+                    const topTile = this.world.getTile(c, topGridY);
+                    if (topTile > 2 || this.isTileOccupiedByEntity(c, topGridY)) topAlpha = 0.5;
+                    
+                    this.ctx.globalAlpha = topAlpha;
+
+                    this.ctx.fillStyle = '#4A2E19'; 
+                    this.ctx.fillRect(tx, topY, TILE_SIZE, TILE_SIZE);
+                    this.ctx.fillStyle = TILES.ROOF.color; 
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(tx, topY + TILE_SIZE);
+                    this.ctx.lineTo(tx + TILE_SIZE, topY + TILE_SIZE);
+                    this.ctx.lineTo(tx + TILE_SIZE/2, topY);
+                    this.ctx.fill();
+
+                    this.ctx.globalAlpha = 1.0;
+                }
+            }
+        }
         
         this.ctx.font = "bold 14px 'Courier New'";
         this.damageTexts.forEach(d => {
@@ -1118,18 +1232,14 @@ class Game {
             }
         });
         
-        // Draw Cannon Ammo Indicators
         this.ctx.font = "10px monospace";
         this.cannons.forEach(c => {
             const cx = c.x - this.camera.x;
             const cy = c.y - this.camera.y;
-            
-            // Ammo Text
             this.ctx.fillStyle = c.ammo > 0 ? '#00ffff' : '#ff0000';
             this.ctx.fillText(`A:${c.ammo}`, cx - 10, cy - 25);
         });
         
-        // Draw Range Circle (Optional visual feedback when placing)
         if (this.input.mouse.left || this.activeBlueprint) {
              this.ctx.strokeStyle = 'rgba(255,255,255,0.1)';
              this.ctx.beginPath();
