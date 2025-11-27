@@ -6,6 +6,14 @@ export default class World {
         this.seed = seed || Math.floor(Math.random() * 10000);
         this.modifiedTiles = {}; 
         this.tileData = {}; 
+        
+        // [NEW] Wind System
+        // angle: Direction wind is blowing TOWARDS
+        this.wind = { 
+            angle: Math.random() * Math.PI * 2, 
+            targetAngle: Math.random() * Math.PI * 2,
+            timer: 0 
+        };
     }
     getKey(x, y) { return `${x},${y}`; }
     getTile(x, y) { return this.modifiedTiles[this.getKey(x, y)] !== undefined ? this.modifiedTiles[this.getKey(x, y)] : Utils.getBiome(x, y, this.seed); }
@@ -25,6 +33,19 @@ export default class World {
     getTileDamage(x, y) {
         const key = this.getKey(x, y);
         return this.tileData[key] ? this.tileData[key].dmg : 0;
+    }
+
+    // [NEW] Update Wind (Slowly shift direction)
+    update(dt) {
+        this.wind.timer += dt;
+        if (this.wind.timer > 10000) { // Change target every 10 seconds approx
+            this.wind.timer = 0;
+            this.wind.targetAngle = this.wind.angle + (Math.random() - 0.5) * 2; // Shift up to ~60 degrees
+        }
+        
+        // Smooth lerp towards target
+        const diff = this.wind.targetAngle - this.wind.angle;
+        this.wind.angle += diff * 0.001; 
     }
 
     // --- SAVE/LOAD SYSTEM ---

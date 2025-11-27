@@ -11,35 +11,10 @@ MEDIVALPIXELS/
     └── main.js         (Entry point)
 
 ## TODO
-- shoot stones with leftclick. only build roads via structures menud
-- save game and load game from browser localStorage
-- HP to all structures
-- Do not spwan close to water
-- Do not spawn when colliding with anything. 
-- Sheep drop whool when harvested. Whool regrows after 10min
-- sheep will alwyas flee from player
-- sheep have a chance to spwan a new sheep when fed with GRN.
-- sheeps can die from damage by thrown objects
-- only show HP bars of player sheep or npcs when dmg was taken. Not on full hp.
-- Wood walls are now fences that open and close on left click. 
-- Boat structure can be build using wood and whool
-- player can enter boat and leaf boat when boat is next to sand
-- boat can only move on water
-- boat moves faster on deep water
-- npc need to arrive by boat. 
-- npc can only spwan in a boat. 
-- only one NPC boat per human player can exist.
-- npc boats drive torwards the player until land is reached.
-- ther is a nother icon next to the building hammer to craft weapons
-- there are two weapons spears and swords
-- the basic sword needs obsidian and wood
-- the better sword iron and gold
-- the basic spear needs obsidian and wood
-- the better spear needs wood and iron
-- the spare can be thrown just like stones
-- the sword increases damage when running into enemies
-- ships are big multile battleships with cannons to their sides
-- ships and boats have unique movement mechanics. They have a direction and speed that only changes slowly. So manoverability needs skill and planning.
-- hostile ships and boats should have a black flag. Own ships should have a white flag.
-- invading boats should make sure the NPCs are dropped on land not stuck on water or object.
-- invading boats should already have one NPC on board.
+- ships are big multitile battleships with cannons to their sides 
+- ships and boats have unique movement mechanics. They have a direction that is influenced by a rudder. The rudder angle can be adjusted 15 degree per second. The rudder defines the turning circle radius. The ship alwas has a circular path. sometimes with a giant circle that almost feels streight. sometimes with a tine circle. 
+
+- overshooting the target when an npcs runs into the player should not get the npc stuck in a obstacle
+- speed should build up slowly. Not instant. 
+- one should not be able to shoot at own boat when onboard the boat.
+- allow building boats only on water

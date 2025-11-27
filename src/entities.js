@@ -70,6 +70,14 @@ export class Entity {
         this.activeRange = TILES.GREY.id; 
         this.activeMelee = 'hand';   
 
+        // Boat Physics State
+        this.boatStats = {
+            heading: 0,       // Direction facing (radians)
+            speed: 0,         // Current forward velocity
+            rudder: 0,        // Current rudder angle (visual & physics)
+            sailLevel: 0      // 0 = stopped, 1 = full sails (target speed)
+        };
+
         // AI State for NPCs (Chase -> Charge -> Rest)
         this.aiState = { 
             mode: 'chase', // 'chase', 'charge', 'rest'
@@ -79,6 +87,69 @@ export class Entity {
         };
     }
     
+    updateBoatMovement(input, dt, world) {
+        const stats = this.boatStats;
+        const cfg = CONFIG.BOAT;
+        const wind = world.wind;
+
+        // 1. Handle Input (Sails and Rudder)
+        if (input.up) stats.sailLevel = 1; 
+        else if (input.down) stats.sailLevel = -0.5; // Braking/Reversing
+        else stats.sailLevel = 0; // Drifting
+
+        if (input.left) stats.rudder -= cfg.RUDDER_SPEED;
+        if (input.right) stats.rudder += cfg.RUDDER_SPEED;
+
+        // Clamp Rudder
+        if (stats.rudder > cfg.MAX_RUDDER) stats.rudder = cfg.MAX_RUDDER;
+        if (stats.rudder < -cfg.MAX_RUDDER) stats.rudder = -cfg.MAX_RUDDER;
+        
+        if (!input.left && !input.right) {
+            stats.rudder *= 0.9;
+        }
+
+        // [NEW] Wind Physics
+        // Calculate efficiency based on angle difference between Boat Heading and Wind Angle
+        // Cosine: 1.0 (Tailwind), 0.0 (Side), -1.0 (Headwind)
+        // Map to: 1.2 (Tailwind), 0.8 (Side), 0.2 (Headwind)
+        let windEfficiency = 1.0;
+        
+        if (stats.sailLevel > 0) {
+            const angleDiff = stats.heading - wind.angle;
+            const cos = Math.cos(angleDiff); 
+            // Normalize (-1 to 1) -> (0 to 1)
+            const normalized = (cos + 1) / 2; 
+            // Map 0..1 to 0.2..1.2
+            windEfficiency = 0.2 + (normalized * 1.0);
+        }
+
+        // 2. Physics: Acceleration
+        let targetSpeed = stats.sailLevel * cfg.MAX_SPEED * windEfficiency;
+        
+        if (stats.speed < targetSpeed) stats.speed += cfg.ACCELERATION;
+        else if (stats.speed > targetSpeed) stats.speed -= cfg.DECELERATION;
+
+        // Apply Drag
+        if (stats.sailLevel === 0) stats.speed *= 0.98;
+
+        // 3. Physics: Turning
+        const velocityRatio = Math.abs(stats.speed) / cfg.MAX_SPEED;
+        const turnAmount = stats.rudder * (0.2 + (velocityRatio * cfg.TURN_FACTOR));
+        
+        if (Math.abs(stats.speed) > 0.1) {
+             stats.heading += turnAmount;
+        }
+
+        // 4. Calculate Vector
+        const dx = Math.cos(stats.heading) * stats.speed;
+        const dy = Math.sin(stats.heading) * stats.speed;
+
+        // 5. Move
+        this.move(dx, dy, world);
+        
+        this.isMoving = Math.abs(stats.speed) > 0.1;
+    }
+
     move(dx, dy, world) {
         const half = (CONFIG.TILE_SIZE / 2) - 4; 
         
@@ -107,9 +178,17 @@ export class Entity {
 
         const attemptedX = this.x + dx;
         const attemptedY = this.y + dy;
+        let collided = false;
 
         if (verify(attemptedX, this.y)) this.x = attemptedX;
+        else collided = true;
+
         if (verify(this.x, attemptedY)) this.y = attemptedY;
+        else collided = true;
+
+        if (collided && this.inBoat) {
+            this.boatStats.speed *= 0.5;
+        }
 
         if (dx !== 0 || dy !== 0) {
             this.direction = { x: dx, y: dy };

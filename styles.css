@@ -3,9 +3,7 @@ canvas { display: block; image-rendering: pixelated; }
 #ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; }
 .stat-box { background: rgba(0, 0, 0, 0.7); padding: 10px; border: 2px solid #555; margin-bottom: 5px; pointer-events: auto; }
 
-/* --- INVENTORY BARS --- */
-
-/* Material Inventory: Center Bottom */
+/* --- INVENTORY LAYOUT --- */
 #inventory-bar { 
     position: absolute; 
     bottom: 20px; 
@@ -19,7 +17,6 @@ canvas { display: block; image-rendering: pixelated; }
     pointer-events: auto; 
 }
 
-/* Weapon Bar: Bottom Right */
 #weapon-bar { 
     position: absolute; 
     bottom: 20px; 
@@ -39,8 +36,7 @@ canvas { display: block; image-rendering: pixelated; }
 .qty { position: absolute; bottom: 2px; right: 2px; font-weight: bold; font-size: 9px; color: #fff;}
 .short-name { font-size: 10px; color: #aaa; text-transform: uppercase; }
 
-/* --- DYNAMIC WEAPON ICONS --- */
-
+/* --- WEAPON ICONS --- */
 .icon-boulder { width: 18px; height: 18px; background: #777; border-radius: 50%; box-shadow: inset -3px -3px rgba(0,0,0,0.5); margin-bottom: 4px; }
 
 .icon-spear { position: relative; width: 4px; height: 24px; background: #8B4513; margin-bottom: 4px; transform: rotate(45deg); }
@@ -55,8 +51,6 @@ canvas { display: block; image-rendering: pixelated; }
 .icon-sword-css::after { content: ''; position: absolute; bottom: -6px; left: 1px; width: 4px; height: 6px; background: #3e2723; } /* Handle */
 .blade-black { background: #111; border: 1px solid #333; }
 .blade-grey { background: #ccc; border: 1px solid #fff; }
-
-/* --------------------------- */
 
 #messages { position: absolute; top: 10%; width: 100%; text-align: center; font-size: 24px; text-shadow: 2px 2px 0 #000; pointer-events: none; transition: opacity 1s; }
 

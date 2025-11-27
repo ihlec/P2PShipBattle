@@ -99,7 +99,8 @@ export default class Game {
                 x: this.player.x, y: this.player.y, hp: this.player.hp, 
                 inventory: this.player.inventory, inBoat: this.player.inBoat,
                 activeRange: this.player.activeRange, 
-                activeMelee: this.player.activeMelee  
+                activeMelee: this.player.activeMelee,
+                boatStats: this.player.boatStats 
             },
             world: this.world.exportData(),
             boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp, owner: b.owner})),
@@ -123,6 +124,8 @@ export default class Game {
             this.player.activeRange = data.player.activeRange || TILES.GREY.id;
             this.player.activeMelee = data.player.activeMelee || 'hand';
             
+            if (data.player.boatStats) this.player.boatStats = data.player.boatStats;
+
             this.player.isMoving = false;
             
             if (data.invasion) {
@@ -584,6 +587,10 @@ export default class Game {
                         this.player.x = (gx * CONFIG.TILE_SIZE) + 16;
                         this.player.y = (gy * CONFIG.TILE_SIZE) + 16;
                         
+                        // Reset Boat Stats
+                        this.player.boatStats.speed = 0;
+                        this.player.boatStats.sailLevel = 0;
+
                         this.boats.push(new Boat(boatSpawnX, boatSpawnY));
                         
                         this.spawnText(this.player.x, this.player.y, "EXIT BOAT", "#fff");
@@ -597,6 +604,10 @@ export default class Game {
                         this.player.inBoat = true;
                         this.player.x = this.boats[clickedBoatIndex].x;
                         this.player.y = this.boats[clickedBoatIndex].y;
+                        
+                        // Stop velocity on enter
+                        this.player.boatStats.speed = 0;
+
                         this.boats.splice(clickedBoatIndex, 1);
                         this.spawnText(this.player.x, this.player.y, "ENTER BOAT", "#fff");
                         return;
@@ -738,6 +749,9 @@ export default class Game {
         if (this.input.wheel !== 0) {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
+        
+        // [NEW] Update global wind
+        this.world.update(dt);
 
         if (this.shootCooldown > 0) this.shootCooldown--;
 
@@ -748,19 +762,32 @@ export default class Game {
             this.regenTimer = 0;
         }
 
-        let dx = 0, dy = 0;
-        if(this.input.keys['w'] || this.input.keys['arrowup']) dy = -1;
-        if(this.input.keys['s'] || this.input.keys['arrowdown']) dy = 1;
-        if(this.input.keys['a'] || this.input.keys['arrowleft']) dx = -1;
-        if(this.input.keys['d'] || this.input.keys['arrowright']) dx = 1;
-        
-        if (dx || dy) {
-            this.player.isMoving = true; 
-            this.player.moveTime += dt;  
-            const len = Math.sqrt(dx*dx + dy*dy);
-            this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
+        // MOVEMENT LOGIC
+        const inputState = {
+            up: this.input.keys['w'] || this.input.keys['arrowup'],
+            down: this.input.keys['s'] || this.input.keys['arrowdown'],
+            left: this.input.keys['a'] || this.input.keys['arrowleft'],
+            right: this.input.keys['d'] || this.input.keys['arrowright']
+        };
+
+        if (this.player.inBoat) {
+            this.player.updateBoatMovement(inputState, dt, this.world);
+            this.player.moveTime += dt;
         } else {
-            this.player.isMoving = false;
+            let dx = 0, dy = 0;
+            if(inputState.up) dy = -1;
+            if(inputState.down) dy = 1;
+            if(inputState.left) dx = -1;
+            if(inputState.right) dx = 1;
+            
+            if (dx || dy) {
+                this.player.isMoving = true; 
+                this.player.moveTime += dt;  
+                const len = Math.sqrt(dx*dx + dy*dy);
+                this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
+            } else {
+                this.player.isMoving = false;
+            }
         }
 
         const viewW = this.canvas.width / this.zoom;
@@ -849,11 +876,6 @@ export default class Game {
                     const moved = npc.move(Math.cos(angle) * 3.5, Math.sin(angle) * 3.5, this.world);
                     npc.isMoving = true;
                     npc.moveTime += dt;
-                    
-                    // If stuck (didn't move much despite trying), abort to rest
-                    // (Simple check: if not actually changing position, although move() updates x/y directly)
-                    // Better: just timeout if charge takes too long? 
-                    // For now, rely on reaching target.
                 }
             } else if (npc.aiState.mode === 'rest') {
                 // Handled by timer check above. When timer hits 0:
@@ -873,7 +895,7 @@ export default class Game {
                 }
                 
                 // Allow Player to push/damage back
-                if (dx||dy) {
+                if (this.player.isMoving) { // Check moving flag generically
                     let dmg = 0;
                     const meleeId = this.player.activeMelee;
                     if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
@@ -1296,14 +1318,37 @@ export default class Game {
                         const inBoat = isPlayer && obj._orig.inBoat; 
 
                         if (inBoat) {
+                            // [NEW] Rotate Context for Boat
+                            this.ctx.save();
+                            this.ctx.translate(obj.x, obj.y);
+                            this.ctx.rotate(obj._orig.boatStats.heading);
+                            this.ctx.translate(-obj.x, -obj.y);
+
                             this.ctx.fillStyle = '#8B4513';
-                            this.ctx.fillRect(obj.x - 12, obj.y - 2, 24, 12);
-                            this.ctx.fillStyle = '#fff'; // Sail (Player riding = white flag)
+                            // Draw centered on 0,0 relative to translate
+                            // hull
+                            this.ctx.fillRect(obj.x - 12, obj.y - 6, 24, 12);
+                            
+                            // Sail
+                            this.ctx.fillStyle = '#fff'; 
                             this.ctx.beginPath();
-                            this.ctx.moveTo(obj.x, obj.y - 16);
-                            this.ctx.lineTo(obj.x + 12, obj.y - 10);
-                            this.ctx.lineTo(obj.x, obj.y - 4);
+                            this.ctx.moveTo(obj.x + 4, obj.y - 16);
+                            this.ctx.lineTo(obj.x + 16, obj.y); // Pointing back/side
+                            this.ctx.lineTo(obj.x + 4, obj.y + 4);
                             this.ctx.fill();
+
+                            // Mast
+                            this.ctx.fillStyle = '#333';
+                            this.ctx.fillRect(obj.x + 2, obj.y - 4, 4, 4); 
+
+                            // Player Head (Visual reference for center)
+                            this.ctx.fillStyle = '#3498db';
+                            this.ctx.fillRect(obj.x - 4, obj.y - 4, 8, 8);
+
+                            this.ctx.restore(); // Undo rotation
+                            
+                            this.drawHealth(obj._orig);
+                            return; // Skip standard player render
                         }
 
                         const colorShirt = isPlayer ? '#3498db' : '#993333';
@@ -1312,8 +1357,7 @@ export default class Game {
                         const colorHelmet = '#8B6F43';
                         const colorBoots = '#333333';
                         
-                        // NEW: Force idle animation if in boat
-                        const isMoving = obj._orig.isMoving && !inBoat; 
+                        const isMoving = obj._orig.isMoving; 
                         
                         const tick = isMoving ? (obj._orig.moveTime * 0.015) : (Date.now() * 0.005);
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
@@ -1329,27 +1373,22 @@ export default class Game {
                         const BODY_W = 16;
                         const BODY_X = obj.x - BODY_W / 2;
                         
-                        if (!inBoat) {
-                            this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                            this.ctx.beginPath();
-                            this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
-                            this.ctx.fill();
-                        }
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                        this.ctx.beginPath();
+                        this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
+                        this.ctx.fill();
 
-                        // FEET (Hidden if in boat)
-                        if (!inBoat) {
-                            this.ctx.fillStyle = colorBoots;
-                            this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
-                            this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
-                        }
+                        // FEET
+                        this.ctx.fillStyle = colorBoots;
+                        this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
+                        this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
 
                         // If in boat, shift body up slightly
-                        const boatOffset = inBoat ? -4 : 0;
-                        const torsoY = obj.y - 8 - bounceY + boatOffset;
+                        const torsoY = obj.y - 8 - bounceY;
 
                         // LEGS
                         this.ctx.fillStyle = colorPants;
-                        this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY + boatOffset, BODY_W, 6); 
+                        this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY, BODY_W, 6); 
 
                         this.ctx.fillStyle = colorShirt;
                         this.ctx.fillRect(BODY_X, torsoY, BODY_W, 15); 
@@ -1368,7 +1407,7 @@ export default class Game {
 
                         // Draw Weapon in Hand ONLY IF SWORD
                         const heldId = this.player.activeMelee;
-                        if (!inBoat && (heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id)) {
+                        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id)) {
                             // Simple rendering of a sword
                             this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317'; // Iron vs Wood Color
                             this.ctx.lineWidth = 3;
@@ -1429,6 +1468,32 @@ export default class Game {
             this.ctx.stroke();
         }
         
+        // [NEW] Wind Indicator (Top Right)
+        const wx = this.canvas.width - 50;
+        const wy = 50;
+        this.ctx.save();
+        this.ctx.translate(wx, wy);
+        this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, 30, 0, Math.PI*2);
+        this.ctx.fill();
+        
+        this.ctx.rotate(this.world.wind.angle);
+        this.ctx.strokeStyle = '#fff';
+        this.ctx.lineWidth = 3;
+        this.ctx.beginPath();
+        this.ctx.moveTo(-10, -10);
+        this.ctx.lineTo(0, 10);
+        this.ctx.lineTo(10, -10);
+        this.ctx.lineTo(0, -5);
+        this.ctx.closePath();
+        this.ctx.stroke();
+        this.ctx.restore();
+
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = "10px monospace";
+        this.ctx.fillText("WIND", wx-12, wy+45);
+        
         this.ctx.font = "bold 14px monospace";
         this.texts.forEach(t => {
             this.ctx.fillStyle = t.col;
@@ -1445,4 +1510,4 @@ export default class Game {
         this.draw();
         requestAnimationFrame(t => this.loop(t));
     }
-}wd
+}

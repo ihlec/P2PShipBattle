@@ -1,3 +1,5 @@
+import { CONFIG as OLD_CONFIG, TILES as OLD_TILES, BLUEPRINTS as OLD_BP, WEAPONS as OLD_WP } from './config.js'; // Hack to keep referencing current file if needed, but standard export below is correct.
+
 export const CONFIG = {
     TILE_SIZE: 32,
     PLAYER_SPEED_BASE: 2,
@@ -7,7 +9,17 @@ export const CONFIG = {
     NPC_SPAWN_RATE: 0.002, 
     BUILD_RANGE: 400,
     MAX_NPCS: 30,
-    WOOL_REGROW_TIME: 36000 
+    WOOL_REGROW_TIME: 36000,
+    
+    // Age of Sail Physics
+    BOAT: {
+        ACCELERATION: 0.05,
+        DECELERATION: 0.02, // Water drag
+        MAX_SPEED: 4.5,
+        RUDDER_SPEED: 0.03, // How fast the wheel turns
+        MAX_RUDDER: 0.04,   // Max turning angle per frame
+        TURN_FACTOR: 0.8    // Turning effectiveness based on speed
+    }
 };
 
 export const TILES = {
