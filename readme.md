@@ -41,3 +41,5 @@ MEDIVALPIXELS/
 - ships are big multile battleships with cannons to their sides
 - ships and boats have unique movement mechanics. They have a direction and speed that only changes slowly. So manoverability needs skill and planning.
 - hostile ships and boats should have a black flag. Own ships should have a white flag.
+- invading boats should make sure the NPCs are dropped on land not stuck on water or object.
+- invading boats should already have one NPC on board.

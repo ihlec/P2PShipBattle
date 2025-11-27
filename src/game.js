@@ -1,4 +1,4 @@
-import { CONFIG, TILES, ID_TO_TILE, BLUEPRINTS } from './config.js';
+import { CONFIG, TILES, ID_TO_TILE, BLUEPRINTS, WEAPONS } from './config.js';
 import Utils from './utils.js';
 import InputHandler from './input.js';
 import World from './world.js';
@@ -33,6 +33,10 @@ export default class Game {
         this.player = new Entity(validSpawn.x, validSpawn.y, 'player');
         this.player.isMoving = false;
         this.player.moveTime = 0;
+        
+        // Active Weapons State (ID or 'hand')
+        this.player.activeRange = TILES.GREY.id; 
+        this.player.activeMelee = 'hand';        
 
         this.npcs = [];
         this.animals = []; 
@@ -51,18 +55,21 @@ export default class Game {
         this.activeBlueprint = null;
         this.shootCooldown = 0;
         
-        // Invasion Timers
         this.invasionTimer = 0;
-        this.nextInvasionTime = 0; // First one can be immediate or slightly delayed
+        this.nextInvasionTime = 0; 
         
         this.dom = {
             hp: document.getElementById('hp'),
             coords: document.getElementById('coords'),
             seed: document.getElementById('seed-disp'),
             invBar: document.getElementById('inventory-bar'),
+            wpnBar: document.getElementById('weapon-bar'),
             bpMenu: document.getElementById('blueprint-menu'),
+            wpnMenu: document.getElementById('weapon-menu'),
             activeBp: document.getElementById('active-bp-display'),
+            activeWp: document.getElementById('active-weapon-display'),
             bpName: document.getElementById('current-bp-name'),
+            wpName: document.getElementById('current-weapon-name'),
             elev: document.getElementById('elev-disp'),
             biome: document.getElementById('biome-disp') 
         };
@@ -70,6 +77,7 @@ export default class Game {
         this.dom.seed.innerText = this.world.seed;
         
         document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
+        document.getElementById('weapon-btn').onclick = () => this.toggleWeapons();
         document.getElementById('btn-save').onclick = () => this.saveGame();
         document.getElementById('btn-load').onclick = () => this.loadGame();
 
@@ -90,7 +98,9 @@ export default class Game {
         const data = {
             player: { 
                 x: this.player.x, y: this.player.y, hp: this.player.hp, 
-                inventory: this.player.inventory, inBoat: this.player.inBoat 
+                inventory: this.player.inventory, inBoat: this.player.inBoat,
+                activeRange: this.player.activeRange, 
+                activeMelee: this.player.activeMelee  
             },
             world: this.world.exportData(),
             boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp, owner: b.owner})),
@@ -110,9 +120,12 @@ export default class Game {
             this.player.x = data.player.x; this.player.y = data.player.y;
             this.player.hp = data.player.hp; this.player.inventory = data.player.inventory || {};
             this.player.inBoat = data.player.inBoat || false; 
+            
+            this.player.activeRange = data.player.activeRange || TILES.GREY.id;
+            this.player.activeMelee = data.player.activeMelee || 'hand';
+            
             this.player.isMoving = false;
             
-            // Restore invasion timers
             if (data.invasion) {
                 this.invasionTimer = data.invasion.timer || 0;
                 this.nextInvasionTime = data.invasion.next || 0;
@@ -131,7 +144,14 @@ export default class Game {
     }
 
     toggleBlueprints() {
-        const menu = document.getElementById('blueprint-menu');
+        this.dom.wpnMenu.style.display = 'none';
+        const menu = this.dom.bpMenu;
+        menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
+    }
+
+    toggleWeapons() {
+        this.dom.bpMenu.style.display = 'none';
+        const menu = this.dom.wpnMenu;
         menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
     }
 
@@ -144,20 +164,47 @@ export default class Game {
     }
 
     initUI() {
+        // --- 1. Material Inventory Bar ---
         this.dom.invBar.innerHTML = ''; 
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
-        usable.forEach((t) => {
+        const materials = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
+        
+        materials.forEach((t) => {
             const slot = document.createElement('div');
             slot.className = 'slot';
+            slot.id = `slot-${t.id}`;
             slot.innerHTML = `<div class="slot-color" style="background:${t.color}"></div><div class="short-name">${t.short}</div><div class="qty" id="qty-${t.id}">0</div>`;
             slot.onclick = () => {
-                this.player.selectedTile = t.id;
-                this.activeBlueprint = null;
+                // CHANGED: Deselect Logic
+                if (this.player.selectedTile === t.id) {
+                    this.player.selectedTile = null;
+                } else {
+                    this.player.selectedTile = t.id;
+                    this.activeBlueprint = null;
+                }
                 this.updateUI();
             };
             this.dom.invBar.appendChild(slot);
         });
+
+        // --- 2. Weapon Bar (Two Fixed Toggle Slots) ---
+        this.dom.wpnBar.innerHTML = '';
         
+        // A. Range Slot
+        const rangeSlot = document.createElement('div');
+        rangeSlot.className = 'slot';
+        rangeSlot.id = 'slot-range';
+        rangeSlot.onclick = () => this.cycleRangeWeapon();
+        this.dom.wpnBar.appendChild(rangeSlot);
+
+        // B. Melee Slot
+        const meleeSlot = document.createElement('div');
+        meleeSlot.className = 'slot';
+        meleeSlot.id = 'slot-melee';
+        meleeSlot.innerHTML = `<div class="icon-sword">🗡️</div><div class="short-name" id="name-melee">Hand</div>`;
+        meleeSlot.onclick = () => this.cycleMeleeWeapon();
+        this.dom.wpnBar.appendChild(meleeSlot);
+
+        // --- 3. Menus ---
         this.dom.bpMenu.innerHTML = '';
         BLUEPRINTS.forEach((bp, index) => {
             const div = document.createElement('div');
@@ -168,30 +215,138 @@ export default class Game {
             div.onclick = () => { 
                 if (div.classList.contains('disabled')) return;
                 this.activeBlueprint = bp; 
+                this.player.selectedTile = null; 
                 this.toggleBlueprints(); 
                 this.updateUI(); 
             };
             this.dom.bpMenu.appendChild(div);
         });
+
+        this.dom.wpnMenu.innerHTML = '';
+        Object.values(WEAPONS).forEach((wp) => {
+            const div = document.createElement('div');
+            div.className = 'bp-item';
+            let costStr = Object.entries(wp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
+            div.innerHTML = `<div class="bp-name">${wp.name}</div><div class="bp-req">${costStr}</div>`;
+            div.onclick = () => {
+                if (div.classList.contains('disabled')) return;
+                if (!this.godMode) {
+                    for (const [id, qty] of Object.entries(wp.cost)) this.player.inventory[id] -= qty;
+                }
+                this.player.inventory[wp.id] = (this.player.inventory[wp.id] || 0) + 1;
+                this.showMessage(`Crafted ${wp.name}!`, '#fff');
+                this.toggleWeapons();
+                this.updateUI(); 
+            };
+            this.dom.wpnMenu.appendChild(div);
+        });
+
+        this.updateUI();
+    }
+
+    cycleRangeWeapon() {
+        const cycle = [TILES.GREY.id, TILES.SPEAR_WOOD.id, TILES.SPEAR_IRON.id];
+        let idx = cycle.indexOf(this.player.activeRange);
+        if (idx === -1) idx = 0;
+
+        let found = false;
+        let attempts = 0;
+        
+        while(!found && attempts < 3) {
+            idx = (idx + 1) % cycle.length;
+            const nextId = cycle[idx];
+            if (nextId === TILES.GREY.id || (this.player.inventory[nextId] || 0) > 0 || this.godMode) {
+                this.player.activeRange = nextId;
+                found = true;
+            }
+            attempts++;
+        }
+        this.updateUI();
+    }
+
+    cycleMeleeWeapon() {
+        const cycle = ['hand', TILES.SWORD_WOOD.id, TILES.SWORD_IRON.id];
+        let idx = cycle.indexOf(this.player.activeMelee);
+        if (idx === -1) idx = 0;
+
+        let found = false;
+        let attempts = 0;
+        
+        while(!found && attempts < 3) {
+            idx = (idx + 1) % cycle.length;
+            const nextId = cycle[idx];
+            if (nextId === 'hand' || (this.player.inventory[nextId] || 0) > 0 || this.godMode) {
+                this.player.activeMelee = nextId;
+                found = true;
+            }
+            attempts++;
+        }
         this.updateUI();
     }
 
     updateUI() {
-        const slots = document.querySelectorAll('.slot');
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
-        slots.forEach((s, i) => {
-            const id = usable[i].id;
-            s.classList.toggle('active', !this.activeBlueprint && id === this.player.selectedTile);
-            const qtyEl = document.getElementById(`qty-${id}`);
-            if(qtyEl) qtyEl.innerText = this.player.inventory[id] || 0;
+        // Update Material Inventory
+        const materials = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
+        materials.forEach(t => {
+            const slot = document.getElementById(`slot-${t.id}`);
+            const qtyEl = document.getElementById(`qty-${t.id}`);
+            if(slot && qtyEl) {
+                qtyEl.innerText = this.player.inventory[t.id] || 0;
+                slot.classList.toggle('active', !this.activeBlueprint && t.id === this.player.selectedTile);
+            }
         });
 
+        // --- Update Range Weapon Slot ---
+        const rSlot = document.getElementById('slot-range');
+        let rIcon = '';
+        let rName = '';
+        if (this.player.activeRange === TILES.GREY.id) {
+            rIcon = `<div class="icon-boulder"></div>`;
+            rName = 'Stone';
+        } else if (this.player.activeRange === TILES.SPEAR_WOOD.id) {
+            rIcon = `<div class="icon-spear tip-black"></div>`;
+            rName = 'Ob.Spr';
+        } else if (this.player.activeRange === TILES.SPEAR_IRON.id) {
+            rIcon = `<div class="icon-spear tip-grey"></div>`;
+            rName = 'Ir.Spr';
+        }
+        rSlot.innerHTML = `${rIcon}<div class="short-name">${rName}</div>`;
+
+        // --- Update Melee Weapon Slot ---
+        const mSlot = document.getElementById('slot-melee');
+        let mIcon = '';
+        let mName = '';
+        if (this.player.activeMelee === 'hand') {
+            mIcon = `<div class="icon-fist">✊</div>`;
+            mName = 'Hand';
+        } else if (this.player.activeMelee === TILES.SWORD_WOOD.id) {
+            mIcon = `<div class="icon-sword-css blade-black"></div>`;
+            mName = 'Ob.Swd';
+        } else if (this.player.activeMelee === TILES.SWORD_IRON.id) {
+            mIcon = `<div class="icon-sword-css blade-grey"></div>`;
+            mName = 'Ir.Swd';
+        }
+        mSlot.innerHTML = `${mIcon}<div class="short-name">${mName}</div>`;
+
+        // Check costs for Blueprints
         const bpItems = this.dom.bpMenu.children;
         BLUEPRINTS.forEach((bp, i) => {
             const div = bpItems[i];
             let canAfford = true;
             if (bp.cost && !this.godMode) {
                 for (const [id, qty] of Object.entries(bp.cost)) {
+                    if ((this.player.inventory[id] || 0) < qty) { canAfford = false; break; }
+                }
+            }
+            if (canAfford) div.classList.remove('disabled'); else div.classList.add('disabled');
+        });
+
+        const wpItems = this.dom.wpnMenu.children;
+        Object.values(WEAPONS).forEach((wp, i) => {
+            const div = wpItems[i];
+            let canAfford = true;
+            if (wp.cost && !this.godMode) {
+                for (const [id, qty] of Object.entries(wp.cost)) {
                     if ((this.player.inventory[id] || 0) < qty) { canAfford = false; break; }
                 }
             }
@@ -227,18 +382,38 @@ export default class Game {
         return null; 
     }
 
-    throwStone(tx, ty) {
+    throwProjectile(tx, ty) {
         if (this.shootCooldown > 0) return;
-        const id = TILES.GREY.id;
-        if (!this.godMode && (this.player.inventory[id] || 0) <= 0) {
-            this.spawnText(this.player.x, this.player.y - 20, "NO AMMO", "#f00");
-            return;
+        
+        const weaponId = this.player.activeRange;
+        let damage = 25;
+        let speed = 8;
+        let color = '#aaa';
+        let range = 25; 
+        let type = 'stone'; 
+        
+        if (weaponId === TILES.SPEAR_WOOD.id) { damage = 35; speed = 10; color = '#8B4513'; range = 45; type = 'spear'; }
+        else if (weaponId === TILES.SPEAR_IRON.id) { damage = 60; speed = 14; color = '#aaa'; range = 50; type = 'spear'; }
+        
+        if (!this.godMode && (this.player.inventory[weaponId] || 0) <= 0) {
+            if (weaponId !== TILES.GREY.id) {
+                this.spawnText(this.player.x, this.player.y - 20, "NO AMMO", "#f00");
+                return;
+            } else {
+                this.spawnText(this.player.x, this.player.y - 20, "NO STONE", "#f00");
+                return;
+            }
         }
         
-        if (!this.godMode) this.player.inventory[id]--;
-        this.projectiles.push(new Projectile(this.player.x, this.player.y - 10, tx, ty, 25, 8, '#aaa', true));
-        this.shootCooldown = 20; 
-        this.spawnParticles(this.player.x, this.player.y, '#aaa', 3);
+        if (!this.godMode) this.player.inventory[weaponId]--;
+        
+        const proj = new Projectile(this.player.x, this.player.y - 10, tx, ty, damage, speed, color, true, type);
+        proj.life = range; 
+        this.projectiles.push(proj);
+        
+        this.shootCooldown = 30;
+        if (type === 'stone') this.spawnParticles(this.player.x, this.player.y, '#aaa', 3);
+        
         this.updateUI();
     }
 
@@ -286,9 +461,30 @@ export default class Game {
                 }
             }
 
-            if (!this.activeBlueprint && this.player.selectedTile === TILES.GREY.id) {
-                this.throwStone(mx, my);
-                return;
+            // --- SHOOTING (If no active blueprint AND no material selected) ---
+            if (!this.activeBlueprint) {
+                const sel = this.player.selectedTile;
+                // Attack if: (None selected) OR (Stone selected, allowing it to act as weapon/build override if preferred)
+                // Given the instruction "Once no resource is selected... range attach", 
+                // we ONLY throw if sel is null.
+                if (!sel) {
+                    this.throwProjectile(mx, my);
+                    return;
+                }
+                
+                // If we DO have a selection, try building
+                if (sel) {
+                    const id = sel;
+                    const canAfford = (c) => this.godMode || (this.player.inventory[id] || 0) >= c;
+                    if (canAfford(1)) {
+                       if (this.tryBuild(gx, gy, id, false, false)) {
+                           if(!this.godMode) this.player.inventory[id]--;
+                           this.updateUI();
+                           this.recalcCannons();
+                       }
+                    }
+                    return;
+                }
             }
 
             if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return;
@@ -374,16 +570,6 @@ export default class Game {
                                 }
                             });
                         }
-                        this.updateUI();
-                        this.recalcCannons();
-                    }
-                }
-            } else {
-                if (isOccupied(gx, gy)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
-                const id = this.player.selectedTile;
-                if (canAfford(id, 1)) {
-                    if (this.tryBuild(gx, gy, id, false, false)) {
-                        consume(id, 1);
                         this.updateUI();
                         this.recalcCannons();
                     }
@@ -653,6 +839,19 @@ export default class Game {
             npc.moveTime += dt;
             
             if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
+                // Melee Damage (Passive)
+                const meleeId = this.player.activeMelee;
+                if ((meleeId === TILES.SWORD_WOOD.id || meleeId === TILES.SWORD_IRON.id) && (dx || dy)) {
+                    if (this.shootCooldown <= 0) {
+                        const dmg = meleeId === TILES.SWORD_IRON.id ? 90 : 50;
+                        npc.hp -= dmg;
+                        this.spawnParticles(npc.x, npc.y, '#fff', 8);
+                        this.spawnText(npc.x, npc.y, `HIT ${dmg}`, "#ff0");
+                        npc.move((dx)*30, (dy)*30, this.world);
+                        this.shootCooldown = 20; 
+                    }
+                }
+
                 if (!this.godMode) {
                     this.player.damageBuffer += 0.5; 
                     if (this.player.damageBuffer >= 1) {
@@ -661,11 +860,6 @@ export default class Game {
                         this.player.damageBuffer -= dmg;
                         if (Math.random() > 0.8) this.spawnParticles(this.player.x, this.player.y, '#f00', 2);
                     }
-                }
-                if (dx||dy) {
-                    npc.move(dx * 20, dy * 20, this.world); 
-                    npc.hp -= 5;
-                    this.spawnParticles(npc.x, npc.y, '#f00', 5);
                 }
             }
         });
@@ -703,7 +897,6 @@ export default class Game {
         this.projectiles.forEach(p => {
             p.update();
             if (p.owner === 'player' || p.owner === 'enemy') { 
-                // NEW: Added this.boats to potential targets
                 const potentialTargets = [...this.npcs, ...this.animals, ...this.boats];
                 potentialTargets.forEach(n => {
                     if (p.active && Utils.distance(p, n) < 16) {
@@ -1128,6 +1321,23 @@ export default class Game {
                         this.ctx.fillStyle = colorHelmet;
                         this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6); 
 
+                        // Draw Weapon in Hand ONLY IF SWORD
+                        const heldId = this.player.activeMelee;
+                        if (!inBoat && (heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id)) {
+                            // Simple rendering of a sword
+                            this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317'; // Iron vs Wood Color
+                            this.ctx.lineWidth = 3;
+                            
+                            // Position relative to hand
+                            const handX = obj.x + 10; 
+                            const handY = torsoY + 6 + arm2Offset;
+                            
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(handX, handY);
+                            this.ctx.lineTo(handX + 10, handY - 10); // Pointing up/out
+                            this.ctx.stroke();
+                        }
+
                         const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 };
                         let eyeX1 = obj.x - 5;
                         let eyeX2 = obj.x + 2;
@@ -1149,9 +1359,7 @@ export default class Game {
 
         this.ctx.fillStyle = '#fff';
         this.projectiles.forEach(p => {
-            this.ctx.beginPath();
-            this.ctx.arc(p.x, p.y, 4, 0, 6.28);
-            this.ctx.fill();
+            if(p.draw) p.draw(this.ctx, 0, 0); // Use projectile's draw method
         });
 
         this.particles.forEach(p => p.draw(this.ctx, 0, 0)); 
@@ -1192,4 +1400,4 @@ export default class Game {
         this.draw();
         requestAnimationFrame(t => this.loop(t));
     }
-}a
+}

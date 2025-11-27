@@ -2,8 +2,8 @@ export const CONFIG = {
     TILE_SIZE: 32,
     PLAYER_SPEED_BASE: 2,
     PLAYER_SPEED_ROAD: 3,
-    PLAYER_SPEED_WATER: 2,      // NEW
-    PLAYER_SPEED_DEEP_WATER: 4, // NEW: Fast travel on deep ocean
+    PLAYER_SPEED_WATER: 2,      
+    PLAYER_SPEED_DEEP_WATER: 4, 
     NPC_SPAWN_RATE: 0.002, 
     BUILD_RANGE: 400,
     MAX_NPCS: 30,
@@ -37,7 +37,13 @@ export const TILES = {
     GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' },
     
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' },
-    BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' } // NEW ITEM
+    BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' },
+
+    // WEAPONS AS ITEMS
+    SPEAR_WOOD: { id: 30, color: '#5C3317', solid: false, name: 'Wd.Spear', short: 'W.Spr' },
+    SPEAR_IRON: { id: 31, color: '#aaa', solid: false, name: 'Ir.Spear', short: 'I.Spr' },
+    SWORD_WOOD: { id: 32, color: '#5C3317', solid: false, name: 'Wd.Sword', short: 'W.Swd' },
+    SWORD_IRON: { id: 33, color: '#ccc', solid: false, name: 'Ir.Sword', short: 'I.Swd' }
 };
 
 export const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
@@ -50,6 +56,12 @@ export const BLUEPRINTS = [
     { name: "Fence/Gate", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
     { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
     { name: "Road Segment", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1 } },
-    // NEW: Boat Blueprint
     { name: "Boat", structure: [{x:0, y:0, id: TILES.BOAT.id}], cost: { [TILES.WOOD.id]: 5, [TILES.WOOL.id]: 2 }, special: 'boat' } 
 ];
+
+export const WEAPONS = {
+    SPEAR_WOOD: { id: TILES.SPEAR_WOOD.id, name: "Obsidian Spear", type: 'range', damage: 35, speed: 10, range: 60, color: '#8B4513', cost: { [TILES.BLACK.id]: 1, [TILES.WOOD.id]: 2 } },
+    SPEAR_IRON: { id: TILES.SPEAR_IRON.id, name: "Iron Spear", type: 'range', damage: 60, speed: 14, range: 60, color: '#aaa', cost: { [TILES.WOOD.id]: 1, [TILES.IRON.id]: 2 } },
+    SWORD_WOOD: { id: TILES.SWORD_WOOD.id, name: "Obsidian Sword", type: 'melee', damage: 50, cost: { [TILES.BLACK.id]: 1, [TILES.WOOD.id]: 2 } },
+    SWORD_IRON: { id: TILES.SWORD_IRON.id, name: "Iron Sword", type: 'melee', damage: 90, cost: { [TILES.IRON.id]: 2, [TILES.GOLD.id]: 1 } }
+};

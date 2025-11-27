@@ -17,23 +17,38 @@ export class Particle {
 }
 
 export class Projectile {
-    constructor(x, y, tx, ty, damage, speed, color, isPlayerOwner) {
+    constructor(x, y, tx, ty, damage, speed, color, isPlayerOwner, type = 'stone') {
         this.x = x; this.y = y;
         this.damage = damage;
         this.color = color;
         this.active = true;
         this.owner = isPlayerOwner ? 'player' : 'enemy';
         this.life = 100; 
-        const angle = Math.atan2(ty - y, tx - x);
-        this.dx = Math.cos(angle) * speed;
-        this.dy = Math.sin(angle) * speed;
+        this.type = type; // 'stone' or 'spear'
+        
+        this.angle = Math.atan2(ty - y, tx - x);
+        this.dx = Math.cos(this.angle) * speed;
+        this.dy = Math.sin(this.angle) * speed;
     }
     update() { this.x += this.dx; this.y += this.dy; this.life--; if (this.life <= 0) this.active = false; }
     draw(ctx, camX, camY) {
-        ctx.fillStyle = this.color;
-        ctx.beginPath();
-        ctx.arc(this.x - camX, this.y - camY, 4, 0, Math.PI * 2);
-        ctx.fill();
+        if (this.type === 'spear') {
+            // Draw elongated projectile rotated to flight path
+            ctx.save();
+            ctx.translate(this.x - camX, this.y - camY);
+            ctx.rotate(this.angle);
+            ctx.fillStyle = this.color;
+            ctx.fillRect(-10, -2, 20, 4); // The shaft
+            ctx.fillStyle = '#fff'; // Tip
+            ctx.fillRect(10, -2, 4, 4); 
+            ctx.restore();
+        } else {
+            // Draw standard stone/ball
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x - camX, this.y - camY, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 }
 
@@ -45,35 +60,39 @@ export class Entity {
         this.maxHp = 100; 
         this.damageBuffer = 0;
         this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0, [TILES.WOOL.id]: 0 };
-        this.selectedTile = TILES.GREY.id;
+        
+        // CHANGED: Default is now null (None selected)
+        this.selectedTile = null; 
+        
         this.direction = { x: 0, y: 1 };
         this.isMoving = false;
         this.moveTime = 0;
         this.inBoat = false; 
+        this.equippedWeapon = null; 
+        
+        // Active Weapons State (ID or 'hand')
+        this.activeRange = TILES.GREY.id; 
+        this.activeMelee = 'hand';   
     }
     
     move(dx, dy, world) {
         const half = (CONFIG.TILE_SIZE / 2) - 4; 
         
-        // Collision Logic Switch
         const check = (tx, ty) => {
             const gx = Math.floor(tx / CONFIG.TILE_SIZE);
             const gy = Math.floor(ty / CONFIG.TILE_SIZE);
             const tileId = world.getTile(gx, gy);
             
             if (this.inBoat) {
-                // BOAT MODE: Move on Water/Deep Water only
                 if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return true;
-                return false; // Land is solid for a boat
+                return false; 
             } else {
-                // NORMAL MODE: Water is solid, everything else checked by world.isSolid
                 if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return false;
                 if (world.isSolid(gx, gy)) return false;
                 return true;
             }
         };
         
-        // Four corners collision check
         const verify = (nx, ny) => {
             if (!check(nx - half, ny - half)) return false;
             if (!check(nx + half, ny - half)) return false;
@@ -96,7 +115,6 @@ export class Entity {
             this.isMoving = false;
         }
 
-        // Speed calculation based on terrain and boat state
         const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
         const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
         const currentTile = world.getTile(gx, gy);
@@ -149,11 +167,9 @@ export class Boat extends Entity {
         super(x, y, 'boat');
         this.hp = 100;
         this.maxHp = 100;
-        this.owner = owner; // 'player' or 'enemy'
+        this.owner = owner;
         this.inBoat = true; 
         this.isLanded = false;
-        
-        // Invasion Logic
         this.activeMinion = null; 
         this.respawnTimer = 0;
         this.nextRespawnTime = 0; 
@@ -180,7 +196,7 @@ export class Boat extends Entity {
                     this.activeMinion = minion;
                     
                     game.spawnParticles(this.x, this.y, '#ff0000', 8);
-                    game.spawnText(this.x, this.y, "INVASION!", "#f00"); // Changed from REINFORCEMENTS
+                    game.spawnText(this.x, this.y, "INVASION!", "#f00"); 
 
                     this.respawnTimer = 0;
                     

@@ -16,9 +16,12 @@
             <div>Elev: <span id="elev-disp"></span> | Seed: <span id="seed-disp"></span></div>
         </div>
         <div class="stat-box">
-            <small>WASD: Move | Click: Build | R-Click: Break/Harvest</small>
+            <small>WASD: Move | Click: Build/Attack | R-Click: Interact</small>
             <div id="active-bp-display" style="display:none;">
-                Active: <span id="current-bp-name"></span>
+                Build: <span id="current-bp-name"></span>
+            </div>
+            <div id="active-weapon-display" style="display:none; color:#ff4444;">
+                Equipped: <span id="current-weapon-name"></span>
             </div>
             <div style="margin-top:5px; padding-top:5px; border-top:1px solid #555;">
                 <button id="btn-save" class="ui-btn">SAVE</button>
@@ -28,10 +31,20 @@
     </div>
 
     <div id="messages"></div>
-    <button id="hammer-btn" title="Open Blueprints">🔨</button>
+    
+    <div id="action-bar">
+        <button id="hammer-btn" title="Structures">🔨</button>
+        <button id="weapon-btn" title="Weapons">⚔️</button>
+    </div>
 
-    <div id="blueprint-menu"></div>
-    <div id="inventory-bar"></div>
+    <div id="blueprint-menu" class="floating-menu"></div>
+    <div id="weapon-menu" class="floating-menu"></div>
+    
+    <div id="bottom-ui">
+        <div id="inventory-bar"></div>
+        <div id="weapon-bar"></div>
+    </div>
+    
     <canvas id="gameCanvas"></canvas>
 
     <script type="module" src="./src/main.js"></script>
