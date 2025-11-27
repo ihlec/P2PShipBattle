@@ -30,8 +30,6 @@ MEDIVALPIXELS/
 - npc can only spwan in a boat. 
 - only one NPC boat per human player can exist.
 - npc boats drive torwards the player until land is reached.
-- Then starts spwaning npc minions to attack. 
-- if a player has already killed many npc. The boat drops more and stronger npcs
 - ther is a nother icon next to the building hammer to craft weapons
 - there are two weapons spears and swords
 - the basic sword needs obsidian and wood

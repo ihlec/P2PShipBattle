@@ -89,7 +89,7 @@ export default class Game {
                 inventory: this.player.inventory, inBoat: this.player.inBoat 
             },
             world: this.world.exportData(),
-            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp})) 
+            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp, owner: b.owner})) 
         };
         try { localStorage.setItem('pixelWarfareSave', JSON.stringify(data)); this.showMessage("GAME SAVED", "#0f0"); } 
         catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
@@ -110,7 +110,7 @@ export default class Game {
             this.npcs = []; this.animals = []; this.projectiles = []; this.particles = []; this.loot = []; this.texts = [];
             
             this.boats = (data.boats || []).map(b => {
-                const boat = new Boat(b.x, b.y);
+                const boat = new Boat(b.x, b.y, b.owner || 'player');
                 boat.hp = b.hp;
                 return boat;
             });
@@ -578,29 +578,33 @@ export default class Game {
 
         this.handleInteraction();
 
-        // NPC Spawn
-        if (this.npcs.length < CONFIG.MAX_NPCS && Math.random() < CONFIG.NPC_SPAWN_RATE) {
-            const ang = Math.random() * 6.28;
-            const dist = 600;
-            const nx = this.player.x + Math.cos(ang)*dist;
-            const ny = this.player.y + Math.sin(ang)*dist;
-            const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
-            const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
-            
-            const spawnPoint = {x: nx, y: ny};
-            const occupied = [...this.npcs, ...this.animals].some(e => Utils.distance(e, spawnPoint) < CONFIG.TILE_SIZE);
-            
-            if (!occupied) {
-                const tile = this.world.getTile(ngx, ngy);
-                const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
-                const isWater = tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
-                if (elevation < 0.35 && !isWater && !ID_TO_TILE[tile].solid) {
-                    this.npcs.push(new Entity(nx, ny, 'npc'));
+        // --- ENEMY BOAT SPAWN LOGIC ---
+        // 1. Check if an enemy boat already exists (Limit: 1)
+        const enemyBoat = this.boats.find(b => b.owner === 'enemy');
+        
+        if (!enemyBoat) {
+            // 2. Try to spawn one at a random angle, distance 600-800
+            if (Math.random() < 0.01) { // 1% chance per frame if not exists
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 600 + Math.random() * 200;
+                const sx = this.player.x + Math.cos(angle) * dist;
+                const sy = this.player.y + Math.sin(angle) * dist;
+                const gx = Math.floor(sx / CONFIG.TILE_SIZE);
+                const gy = Math.floor(sy / CONFIG.TILE_SIZE);
+                
+                // Only spawn if tile is Water or Deep Water
+                const tile = this.world.getTile(gx, gy);
+                if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
+                    this.boats.push(new Boat(sx, sy, 'enemy'));
                 }
             }
+        } else {
+            // 3. Update existing enemy boat logic
+            enemyBoat.updateAI(dt, this.player, this.world, this);
         }
+        // ----------------------------------------
 
-        // Sheep Spawn
+        // Sheep Spawn (Unchanged)
         if (this.animals.length < 10 && Math.random() < 0.005) {
             const ang = Math.random() * 6.28;
             const dist = 600;

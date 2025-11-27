@@ -42,14 +42,14 @@ export class Entity {
         this.x = x; this.y = y; this.type = type;
         this.speed = CONFIG.PLAYER_SPEED_BASE;
         this.hp = 100;
-        this.maxHp = 100; // NEW: For HP bar display logic
+        this.maxHp = 100; 
         this.damageBuffer = 0;
         this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0, [TILES.WOOL.id]: 0 };
         this.selectedTile = TILES.GREY.id;
         this.direction = { x: 0, y: 1 };
         this.isMoving = false;
         this.moveTime = 0;
-        this.inBoat = false; // NEW
+        this.inBoat = false; 
     }
     
     move(dx, dy, world) {
@@ -144,11 +144,73 @@ export class Sheep extends Entity {
     }
 }
 
-// NEW ENTITY
 export class Boat extends Entity {
-    constructor(x, y) {
+    constructor(x, y, owner = 'player') {
         super(x, y, 'boat');
         this.hp = 100;
         this.maxHp = 100;
+        this.owner = owner; // 'player' or 'enemy'
+        this.inBoat = true; 
+        this.isLanded = false;
+        
+        // Invasion Logic
+        this.activeMinion = null; // Track the single active unit
+        this.respawnTimer = 0;
+        this.nextRespawnTime = 0; // Immediate spawn on first landing
     }
-}
+
+    updateAI(dt, player, world, game) {
+        if (this.owner !== 'enemy') return;
+
+        if (this.isLanded) {
+            // Check if our minion is still alive and present in the game
+            const minionAlive = this.activeMinion && 
+                                this.activeMinion.hp > 0 && 
+                                game.npcs.includes(this.activeMinion);
+
+            if (!minionAlive) {
+                this.respawnTimer++;
+                
+                // Wait for cooldown
+                if (this.respawnTimer > this.nextRespawnTime) {
+                    // Spawn logic
+                    const angle = Math.atan2(player.y - this.y, player.x - this.x);
+                    const spawnX = this.x + Math.cos(angle) * 32;
+                    const spawnY = this.y + Math.sin(angle) * 32;
+                    
+                    const minion = new Entity(spawnX, spawnY, 'npc');
+                    game.npcs.push(minion);
+                    this.activeMinion = minion;
+                    
+                    game.spawnParticles(this.x, this.y, '#ff0000', 8);
+                    game.spawnText(this.x, this.y, "REINFORCEMENTS!", "#f00");
+
+                    // Reset Timer
+                    this.respawnTimer = 0;
+                    
+                    // Calc next wait: 2 to 20 mins @ 60fps
+                    // 2 mins = 120s = 7200 frames
+                    // 20 mins = 1200s = 72000 frames
+                    const minFrames = 7200;
+                    const maxFrames = 72000;
+                    this.nextRespawnTime = minFrames + Math.random() * (maxFrames - minFrames);
+                    
+                    console.log(`Next invasion spawn in ${(this.nextRespawnTime/60/60).toFixed(2)} mins`);
+                }
+            }
+        } else {
+            // Move towards player
+            const angle = Math.atan2(player.y - this.y, player.x - this.x);
+            const prevX = this.x;
+            const prevY = this.y;
+            
+            this.move(Math.cos(angle) * 1.0, Math.sin(angle) * 1.0, world); 
+
+            // Check if stuck/landed
+            if (Math.abs(this.x - prevX) < 0.1 && Math.abs(this.y - prevY) < 0.1) {
+                this.isLanded = true;
+                game.spawnText(this.x, this.y, "INVASION!", "#f00");
+            }
+        }
+    }
+}s
