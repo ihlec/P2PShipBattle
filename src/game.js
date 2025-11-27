@@ -12,14 +12,30 @@ export default class Game {
         window.addEventListener('resize', () => this.resize());
 
         this.input = new InputHandler(this);
-        this.world = new World();
-        this.player = new Entity(0, 0, 'player');
         
+        // --- MAP REGENERATION LOGIC ---
+        let validSpawn = null;
+        let attempts = 0;
+        
+        while (!validSpawn && attempts < 10) {
+            this.world = new World(); // Generates new seed
+            validSpawn = this.findSafeSpawn();
+            if (!validSpawn) {
+                console.log("Map rejected (Bad Spawn). Regenerating...");
+                attempts++;
+            }
+        }
+        
+        if (!validSpawn) {
+            // Fallback if 10 attempts fail (extremely rare)
+            validSpawn = {x: 0, y: 0};
+            console.warn("Could not find safe spawn after 10 attempts.");
+        }
+        // ------------------------------
+
+        this.player = new Entity(validSpawn.x, validSpawn.y, 'player');
         this.player.isMoving = false;
         this.player.moveTime = 0;
-        
-        const spawn = this.findSafeSpawn();
-        this.player.x = spawn.x; this.player.y = spawn.y;
 
         this.npcs = [];
         this.animals = []; 
@@ -186,7 +202,8 @@ export default class Game {
             const gx = Math.floor(x/CONFIG.TILE_SIZE); const gy = Math.floor(y/CONFIG.TILE_SIZE);
             if (isSafe(gx, gy)) return {x, y};
         }
-        return {x: 0, y: 0}; 
+        // Return NULL if no spawn found (triggers regen)
+        return null; 
     }
 
     throwStone(tx, ty) {
@@ -221,7 +238,6 @@ export default class Game {
         };
 
         if (this.input.mouse.clickedLeft) {
-            
             const clickedTile = this.world.getTile(gx, gy);
             if (clickedTile === TILES.WOOD_WALL.id) {
                 this.world.setTile(gx, gy, TILES.WOOD_WALL_OPEN.id);
@@ -537,6 +553,11 @@ export default class Game {
             const ang = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
             npc.move(Math.cos(ang)*2, Math.sin(ang)*2, this.world);
             
+            // --- NPC ANIMATION UPDATE ---
+            npc.isMoving = true; // NPCs (Enemies) always move
+            npc.moveTime += dt;
+            // ----------------------------
+            
             if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
                 if (!this.godMode) {
                     this.player.damageBuffer += 0.5; 
@@ -557,6 +578,10 @@ export default class Game {
 
         this.animals.forEach(s => {
             s.updateAI(dt, this.player, this.world);
+            
+            // --- SHEEP ANIMATION UPDATE ---
+            if (s.isMoving) s.moveTime += dt;
+            // ------------------------------
             
             if (s.fed) {
                 this.animals.forEach(mate => {
@@ -874,13 +899,11 @@ export default class Game {
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else if (obj._type === 'sheep') {
-                        // --- IMPROVED SHEEP RENDER ---
                         const isMoving = obj._orig.moveTimer > 0;
                         const tick = isMoving ? (Date.now() * 0.015) : (Date.now() * 0.005);
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 2 : 0;
                         const breathe = !isMoving ? Math.sin(tick) * 0.5 : 0;
                         
-                        // Shadow
                         this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
                         this.ctx.beginPath();
                         this.ctx.ellipse(obj.x, obj.y + 6, 8, 3, 0, 0, Math.PI * 2);
@@ -888,24 +911,20 @@ export default class Game {
 
                         const bodyY = obj.y - 10 - bounceY - breathe;
 
-                        // Legs
                         const legOffset1 = isMoving ? Math.sin(tick)*3 : 0;
                         const legOffset2 = isMoving ? Math.sin(tick+Math.PI)*3 : 0;
                         this.ctx.fillStyle = '#111';
                         this.ctx.fillRect(obj.x - 6 + legOffset1, obj.y + 2, 3, 6);
                         this.ctx.fillRect(obj.x + 3 + legOffset2, obj.y + 2, 3, 6);
 
-                        // Body
                         this.ctx.fillStyle = obj.fed ? '#ffcccc' : (obj.hasWool ? '#eeeeee' : '#aaaaaa');
                         this.ctx.fillRect(obj.x - 10, bodyY, 20, 14);
                         
-                        // Head
                         this.ctx.fillStyle = '#111';
                         this.ctx.fillRect(obj.x + 8, bodyY - 2, 8, 8);
                         
                         this.drawHealth(obj._orig);
                     } else {
-                        // --- IMPROVED PLAYER/NPC ANIMATION ---
                         const isPlayer = obj._type === 'player';
                         const colorShirt = isPlayer ? '#3498db' : '#993333';
                         const colorPants = isPlayer ? '#8B4513' : '#654321';
@@ -916,15 +935,13 @@ export default class Game {
                         const isMoving = obj._orig.isMoving;
                         const tick = isMoving ? (obj._orig.moveTime * 0.015) : (Date.now() * 0.005);
                         
-                        // 1. Bobbing (Vertical Bounce) - DAMPENED AS REQUESTED
+                        // DAMPENED BOBBING (1.5px instead of 3px)
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
                         
-                        // 2. Leg Movement (Sine wave)
                         const stride = 4;
                         const leg1Offset = isMoving ? Math.sin(tick) * stride : 0;
                         const leg2Offset = isMoving ? Math.sin(tick + Math.PI) * stride : 0;
                         
-                        // 3. Arm Movement (Opposite to legs)
                         const armSwing = 5;
                         const arm1Offset = isMoving ? Math.sin(tick + Math.PI) * armSwing : 0;
                         const arm2Offset = isMoving ? Math.sin(tick) * armSwing : 0;
@@ -932,52 +949,43 @@ export default class Game {
                         const BODY_W = 16;
                         const BODY_X = obj.x - BODY_W / 2;
                         
-                        // Shadow
                         this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
                         this.ctx.beginPath();
                         this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
                         this.ctx.fill();
 
-                        // FEET
                         this.ctx.fillStyle = colorBoots;
                         this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
                         this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
 
                         const torsoY = obj.y - 8 - bounceY;
 
-                        // LEGS
                         this.ctx.fillStyle = colorPants;
                         this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY, BODY_W, 6); 
 
-                        // BODY
                         this.ctx.fillStyle = colorShirt;
                         this.ctx.fillRect(BODY_X, torsoY, BODY_W, 15); 
                         
-                        // ARMS (With swing)
                         this.ctx.fillStyle = colorSkin;
-                        this.ctx.fillRect(obj.x - 12, torsoY + 4 + arm1Offset, 4, 4); // Left Arm
-                        this.ctx.fillRect(obj.x + 8, torsoY + 4 + arm2Offset, 4, 4);  // Right Arm
+                        this.ctx.fillRect(obj.x - 12, torsoY + 4 + arm1Offset, 4, 4); 
+                        this.ctx.fillRect(obj.x + 8, torsoY + 4 + arm2Offset, 4, 4); 
 
-                        // HEAD 
                         const HEAD_SIZE = 12;
                         const HEAD_Y = torsoY - 14;
                         this.ctx.fillStyle = colorSkin;
                         this.ctx.fillRect(obj.x - HEAD_SIZE/2, HEAD_Y, HEAD_SIZE, HEAD_SIZE); 
 
-                        // HELMET
                         this.ctx.fillStyle = colorHelmet;
                         this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6); 
 
-                        // EYES
                         const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 };
                         let eyeX1 = obj.x - 5;
                         let eyeX2 = obj.x + 2;
                         
-                        // Simple eye logic based on direction
                         if (dir.x > 0) { eyeX1 += 2; eyeX2 += 2; }
                         if (dir.x < 0) { eyeX1 -= 2; eyeX2 -= 2; }
                         
-                        if (dir.y >= 0) { // Only draw eyes if facing down or sideways
+                        if (dir.y >= 0) { 
                             this.ctx.fillStyle = '#000000';
                             this.ctx.fillRect(eyeX1, HEAD_Y + 4, 3, 3);
                             this.ctx.fillRect(eyeX2, HEAD_Y + 4, 3, 3);

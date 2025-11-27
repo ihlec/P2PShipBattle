@@ -46,6 +46,10 @@ export class Entity {
         this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0, [TILES.WOOL.id]: 0 };
         this.selectedTile = TILES.GREY.id;
         this.direction = { x: 0, y: 1 };
+        
+        // Animation State
+        this.isMoving = false;
+        this.moveTime = 0;
     }
     
     move(dx, dy, world) {
@@ -64,8 +68,13 @@ export class Entity {
         if (check(attemptedX, this.y)) this.x = attemptedX;
         if (check(this.x, attemptedY)) this.y = attemptedY;
 
-        if (dx !== 0 || dy !== 0 || (dx === 0 && dy === 0 && this.type === 'player')) {
-            this.direction = (dx === 0 && dy === 0) ? { x: 0, y: 0 } : { x: dx, y: dy };
+        // Update direction and moving state
+        if (dx !== 0 || dy !== 0) {
+            this.direction = { x: dx, y: dy };
+            this.isMoving = true;
+        } else if (this.type === 'player') {
+            this.direction = { x: 0, y: 0 };
+            this.isMoving = false;
         }
 
         const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
@@ -82,27 +91,21 @@ export class Sheep extends Entity {
         this.moveAngle = 0;
         this.fed = false; 
         this.hasWool = true;
-        this.woolTimer = 0; // Regrowth timer
+        this.woolTimer = 0;
     }
 
     updateAI(dt, player, world) {
-        // Wool Regrowth
         if (!this.hasWool) {
             this.woolTimer--;
-            if (this.woolTimer <= 0) {
-                this.hasWool = true;
-            }
+            if (this.woolTimer <= 0) this.hasWool = true;
         }
 
         const dist = Utils.distance(this, player);
         
-        // 1. Flee Logic
         if (dist < 150) {
             const angle = Math.atan2(this.y - player.y, this.x - player.x);
             this.move(Math.cos(angle) * 1.5, Math.sin(angle) * 1.5, world);
-        } 
-        // 2. Wander Logic
-        else {
+        } else {
             this.moveTimer--;
             if (this.moveTimer <= 0) {
                 this.moveTimer = 60 + Math.random() * 60;
