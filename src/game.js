@@ -2,7 +2,7 @@ import { CONFIG, TILES, ID_TO_TILE, BLUEPRINTS } from './config.js';
 import Utils from './utils.js';
 import InputHandler from './input.js';
 import World from './world.js';
-import { Entity, Particle } from './entities.js';
+import { Entity, Particle, Projectile, Sheep } from './entities.js';
 
 export default class Game {
     constructor() {
@@ -11,20 +11,18 @@ export default class Game {
         this.resize();
         window.addEventListener('resize', () => this.resize());
 
-        // Pass 'this' so InputHandler can call game methods
         this.input = new InputHandler(this);
         this.world = new World();
         this.player = new Entity(0, 0, 'player');
         
-        // --- ANIMATION STATE TRACKING ---
         this.player.isMoving = false;
         this.player.moveTime = 0;
         
-        // --- SPAWN LOGIC ---
         const spawn = this.findSafeSpawn();
         this.player.x = spawn.x; this.player.y = spawn.y;
 
         this.npcs = [];
+        this.animals = []; // Stores Sheep
         this.loot = [];
         this.projectiles = [];
         this.particles = [];
@@ -37,6 +35,7 @@ export default class Game {
         this.regenTimer = 0;
         this.godMode = false;
         this.activeBlueprint = null;
+        this.shootCooldown = 0;
         
         this.dom = {
             hp: document.getElementById('hp'),
@@ -52,10 +51,7 @@ export default class Game {
         
         this.dom.seed.innerText = this.world.seed;
         
-        // Setup Hammer Button
         document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
-
-        // Setup Save/Load Buttons
         document.getElementById('btn-save').onclick = () => this.saveGame();
         document.getElementById('btn-load').onclick = () => this.loadGame();
 
@@ -72,65 +68,29 @@ export default class Game {
         requestAnimationFrame(t => this.loop(t));
     }
 
-    // --- SAVE / LOAD SYSTEM ---
     saveGame() {
         const data = {
-            player: {
-                x: this.player.x,
-                y: this.player.y,
-                hp: this.player.hp,
-                inventory: this.player.inventory
-            },
+            player: { x: this.player.x, y: this.player.y, hp: this.player.hp, inventory: this.player.inventory },
             world: this.world.exportData()
         };
-        try {
-            localStorage.setItem('pixelWarfareSave', JSON.stringify(data));
-            this.showMessage("GAME SAVED", "#0f0");
-        } catch (e) {
-            console.error(e);
-            this.showMessage("SAVE FAILED", "#f00");
-        }
+        try { localStorage.setItem('pixelWarfareSave', JSON.stringify(data)); this.showMessage("GAME SAVED", "#0f0"); } 
+        catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
     }
 
     loadGame() {
         const json = localStorage.getItem('pixelWarfareSave');
-        if (!json) {
-            this.showMessage("NO SAVE FOUND", "#f00");
-            return;
-        }
-
+        if (!json) { this.showMessage("NO SAVE FOUND", "#f00"); return; }
         try {
             const data = JSON.parse(json);
-
-            // 1. Restore World
             this.world.importData(data.world);
             this.dom.seed.innerText = this.world.seed;
-
-            // 2. Restore Player
-            this.player.x = data.player.x;
-            this.player.y = data.player.y;
-            this.player.hp = data.player.hp;
-            this.player.inventory = data.player.inventory || {};
+            this.player.x = data.player.x; this.player.y = data.player.y;
+            this.player.hp = data.player.hp; this.player.inventory = data.player.inventory || {};
             this.player.isMoving = false;
-            
-            // 3. Reset Dynamic Entities (Prevents conflicts with old world state)
-            this.npcs = [];
-            this.projectiles = [];
-            this.particles = [];
-            this.loot = [];
-            this.texts = [];
-            
-            // 4. Recalculate derived state
-            this.recalcCannons();
-            this.updateUI();
-            this.showMessage("GAME LOADED", "#0f0");
-
-        } catch (e) {
-            console.error(e);
-            this.showMessage("LOAD FAILED (Corrupt Data)", "#f00");
-        }
+            this.npcs = []; this.animals = []; this.projectiles = []; this.particles = []; this.loot = []; this.texts = [];
+            this.recalcCannons(); this.updateUI(); this.showMessage("GAME LOADED", "#0f0");
+        } catch (e) { console.error(e); this.showMessage("LOAD FAILED", "#f00"); }
     }
-    // --------------------------
 
     toggleBlueprints() {
         const menu = document.getElementById('blueprint-menu');
@@ -141,15 +101,13 @@ export default class Game {
 
     showMessage(text, color) {
         const msg = document.getElementById('messages');
-        msg.innerHTML = text;
-        msg.style.color = color || '#fff';
-        msg.style.opacity = 1;
+        msg.innerHTML = text; msg.style.color = color || '#fff'; msg.style.opacity = 1;
         setTimeout(() => msg.style.opacity = 0, 2000);
     }
 
     initUI() {
         this.dom.invBar.innerHTML = ''; 
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS];
+        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
         usable.forEach((t) => {
             const slot = document.createElement('div');
             slot.className = 'slot';
@@ -167,11 +125,7 @@ export default class Game {
             const div = document.createElement('div');
             div.className = 'bp-item';
             let costStr = "Free";
-            if (bp.cost) {
-                costStr = Object.entries(bp.cost)
-                    .map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`)
-                    .join(', ');
-            }
+            if (bp.cost) costStr = Object.entries(bp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
             div.innerHTML = `<div class="bp-name">${bp.name}</div><div class="bp-req">${costStr}</div>`;
             div.onclick = () => { 
                 if (div.classList.contains('disabled')) return;
@@ -186,7 +140,7 @@ export default class Game {
 
     updateUI() {
         const slots = document.querySelectorAll('.slot');
-        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS];
+        const usable = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
         slots.forEach((s, i) => {
             const id = usable[i].id;
             s.classList.toggle('active', !this.activeBlueprint && id === this.player.selectedTile);
@@ -200,14 +154,10 @@ export default class Game {
             let canAfford = true;
             if (bp.cost && !this.godMode) {
                 for (const [id, qty] of Object.entries(bp.cost)) {
-                    if ((this.player.inventory[id] || 0) < qty) {
-                        canAfford = false;
-                        break;
-                    }
+                    if ((this.player.inventory[id] || 0) < qty) { canAfford = false; break; }
                 }
             }
-            if (canAfford) div.classList.remove('disabled');
-            else div.classList.add('disabled');
+            if (canAfford) div.classList.remove('disabled'); else div.classList.add('disabled');
         });
 
         if(this.activeBlueprint) {
@@ -221,28 +171,37 @@ export default class Game {
     findSafeSpawn() {
         const isSafe = (gx, gy) => {
             const t = this.world.getTile(gx, gy);
-            return t === TILES.SAND.id;
+            if (t !== TILES.GRASS.id) return false;
+            const radius = 8;
+            for(let y = -radius; y <= radius; y++) {
+                for(let x = -radius; x <= radius; x++) {
+                    const nt = this.world.getTile(gx + x, gy + y);
+                    if (nt === TILES.WATER.id || nt === TILES.DEEP_WATER.id) return false;
+                }
+            }
+            return true;
         };
-
-        // Attempt 1: Random Sampling (Fast)
         for (let r = 0; r < 2000; r++) { 
-            const x = (Math.random() - 0.5) * 5000; 
-            const y = (Math.random() - 0.5) * 5000;
-            const gx = Math.floor(x/CONFIG.TILE_SIZE);
-            const gy = Math.floor(y/CONFIG.TILE_SIZE);
+            const x = (Math.random() - 0.5) * 5000; const y = (Math.random() - 0.5) * 5000;
+            const gx = Math.floor(x/CONFIG.TILE_SIZE); const gy = Math.floor(y/CONFIG.TILE_SIZE);
             if (isSafe(gx, gy)) return {x, y};
         }
-        
-        // Attempt 2: Spiral Search Outward (Guaranteed)
-        let r = 0;
-        while (r < 1000) { 
-            const points = [{x: r, y: 0}, {x: -r, y: 0}, {x: 0, y: r}, {x: 0, y: -r}, {x: r, y: r}, {x: -r, y: -r}, {x: r, y: -r}, {x: -r, y: r}];
-            for (let p of points) {
-                if (isSafe(p.x, p.y)) return {x: p.x*CONFIG.TILE_SIZE, y: p.y*CONFIG.TILE_SIZE};
-            }
-            r++;
-        }
         return {x: 0, y: 0}; 
+    }
+
+    throwStone(tx, ty) {
+        if (this.shootCooldown > 0) return;
+        const id = TILES.GREY.id;
+        if (!this.godMode && (this.player.inventory[id] || 0) <= 0) {
+            this.spawnText(this.player.x, this.player.y - 20, "NO AMMO", "#f00");
+            return;
+        }
+        
+        if (!this.godMode) this.player.inventory[id]--;
+        this.projectiles.push(new Projectile(this.player.x, this.player.y - 10, tx, ty, 25, 8, '#aaa', true));
+        this.shootCooldown = 20; 
+        this.spawnParticles(this.player.x, this.player.y, '#aaa', 3);
+        this.updateUI();
     }
 
     handleInteraction() {
@@ -257,13 +216,36 @@ export default class Game {
 
         const isOccupied = (tx, ty) => {
             const tileCenter = { x: tx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: ty * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
-            const allEntities = [this.player, ...this.npcs];
+            const allEntities = [this.player, ...this.npcs, ...this.animals];
             return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
         };
 
         if (this.input.mouse.clickedLeft) {
+            
+            // --- SHEEP INTERACTION (FEEDING) ---
+            if (this.player.selectedTile === TILES.GREENS.id) {
+                const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
+                if (clickedSheep && !clickedSheep.fed) {
+                    if (this.player.inventory[TILES.GREENS.id] > 0 || this.godMode) {
+                        if(!this.godMode) this.player.inventory[TILES.GREENS.id]--;
+                        clickedSheep.fed = true;
+                        this.spawnParticles(clickedSheep.x, clickedSheep.y, '#ff00ff', 5); // Love particles
+                        this.spawnText(clickedSheep.x, clickedSheep.y - 10, "❤️", "#f0f");
+                        this.updateUI();
+                        return;
+                    }
+                }
+            }
+            // -----------------------------------
+
+            if (!this.activeBlueprint && this.player.selectedTile === TILES.GREY.id) {
+                this.throwStone(mx, my);
+                return;
+            }
+
             if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return;
 
+            // Cannon Loading
             const cannon = this.cannons.find(c => {
                 const [cx, cy] = c.key.split(',').map(Number);
                 return gx === cx && gy === cy;
@@ -284,28 +266,18 @@ export default class Game {
             if (this.activeBlueprint) {
                 const costMap = this.activeBlueprint.cost || {};
                 let affordable = true;
-
                 for (let [id, qty] of Object.entries(costMap)) {
-                    if (!canAfford(id, qty)) {
-                        affordable = false;
-                        break;
-                    }
+                    if (!canAfford(id, qty)) { affordable = false; break; }
                 }
                 
                 let occupied = false;
                 if (affordable) {
                     for (const part of this.activeBlueprint.structure) {
-                        if (isOccupied(gx + part.x, gy + part.y)) {
-                            occupied = true;
-                            break;
-                        }
+                        if (isOccupied(gx + part.x, gy + part.y)) { occupied = true; break; }
                     }
                 }
 
-                if (occupied) {
-                    this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BUILD: OCCUPIED", "#f00");
-                    return;
-                }
+                if (occupied) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
 
                 if (affordable) {
                     const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
@@ -313,14 +285,12 @@ export default class Game {
                     if (this.activeBlueprint.special === 'bridge') {
                         const targetId = this.world.getTile(gx, gy);
                         if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id && targetId !== TILES.WOOD_RAIL.id) {
-                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00");
-                             return;
+                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00"); return;
                         }
                     } else if (this.activeBlueprint.requiresWater) {
                         const targetId = this.world.getTile(gx, gy);
                         if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id) {
-                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00");
-                             return;
+                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00"); return;
                         }
                     }
                     
@@ -332,7 +302,6 @@ export default class Game {
                     
                     if (built) {
                         for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
-                        
                         if (this.activeBlueprint.special === 'bridge') {
                             const neighbors = [{x:gx+1, y:gy}, {x:gx-1, y:gy}, {x:gx, y:gy+1}, {x:gx, y:gy-1}];
                             neighbors.forEach(n => {
@@ -348,11 +317,7 @@ export default class Game {
                     }
                 }
             } else {
-                if (isOccupied(gx, gy)) {
-                    this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BUILD: OCCUPIED", "#f00");
-                    return;
-                }
-                
+                if (isOccupied(gx, gy)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
                     if (this.tryBuild(gx, gy, id, false, false)) {
@@ -363,106 +328,82 @@ export default class Game {
                 }
             }
         } else if (this.input.mouse.clickedRight) {
+            // --- SHEEP SHEARING ---
+            const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
+            if (clickedSheep && clickedSheep.hasWool) {
+                clickedSheep.hasWool = false;
+                this.loot.push({x: clickedSheep.x, y: clickedSheep.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
+                this.spawnParticles(clickedSheep.x, clickedSheep.y, '#eee', 5);
+                return;
+            }
+            // ----------------------
+
             if (this.activeBlueprint) {
                 this.activeBlueprint = null;
                 this.updateUI();
             } else {
-                let tx = gx, ty = gy;
+                const tx = gx; const ty = gy;
                 let tileId = this.world.getTile(gx, gy);
-                
-                if (tileId === TILES.WOOD_RAIL.id) {
-                     this.spawnText(mx * this.zoom, my * this.zoom, "BREAK ROAD TO DEMOLISH", "#f00");
-                     return;
-                }
-                
-                if (!ID_TO_TILE[tileId].solid && tileId !== TILES.TREE.id) {
+                const tileDef = ID_TO_TILE[tileId];
+
+                if (!tileDef.solid && tileId !== TILES.TREE.id) {
                     let below = this.world.getTile(gx, gy + 1);
-                    if ([12,14,15].includes(below)) { ty = gy + 1; tileId = below; }
+                    if ([12,14,15].includes(below)) { tileId = below; } 
                     else {
                         let below2 = this.world.getTile(gx, gy + 2);
-                        if ([12,14,15].includes(below2)) { ty = gy + 2; tileId = below2; }
+                        if ([12,14,15].includes(below2)) { tileId = below2; }
                     }
                 }
+                
+                if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id || tileId === TILES.SAND.id || tileId === TILES.GRASS.id) return;
+                
+                if (tileId === TILES.TREE.id) {
+                    this.world.setTile(tx, ty, TILES.GRASS.id);
+                    this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
+                    this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
+                    if (Math.random() < 0.1) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
+                    return;
+                }
 
-                if (tileId !== TILES.GRASS.id && tileId !== TILES.WATER.id && tileId !== TILES.DEEP_WATER.id && tileId !== TILES.SAND.id) {
-                    if (tileId === TILES.TREE.id) {
-                        this.world.setTile(tx, ty, TILES.GRASS.id);
-                        this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
-                        this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
+                const targetDef = ID_TO_TILE[tileId];
+                if (targetDef.hp) {
+                    const damageDealt = 20; 
+                    const totalDmg = this.world.hitTile(tx, ty, damageDealt);
+                    
+                    this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 3);
+                    this.spawnText(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE, `-${damageDealt}`, '#fff');
+
+                    if (totalDmg >= targetDef.hp) {
+                        this.world.setTile(tx, ty, TILES.GRASS.id); 
+                        this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
                         
-                        if (Math.random() < 0.1) {
-                            this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
+                        if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
+                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 3, bob: Math.random()*100});
+                             if (Math.random() < 0.1) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
+                             if (Math.random() < 0.01) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
+                        } else if ([12,14,15].includes(tileId)) {
+                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 4, bob: Math.random()*100});
+                        } else if (tileId === TILES.WOOD_WALL.id) {
+                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
+                        } else if (tileId === TILES.WALL.id) {
+                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 1, bob: Math.random()*100});
                         }
+                        
+                        this.recalcCannons();
                         this.updateUI();
-                        return;
                     }
+                    return;
+                }
 
-                    if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
-                        const dmg = 20; 
-                        const totalDmg = this.world.hitTile(tx, ty, dmg);
-                        const maxHp = 100;
-                        
-                        this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 3);
-                        this.spawnText(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE, `-${dmg}`, '#fff');
-
-                        if (totalDmg >= maxHp) {
-                            this.world.setTile(tx, ty, TILES.GRASS.id); 
-                            this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
-                            
-                            let stoneQty = 3;
-                            if (Math.random() < 0.1) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
-                            if (Math.random() < 0.01) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
-                            this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: stoneQty, bob: Math.random()*100});
-                        }
-                        return; 
-                    }
-
-                    const tilesToRemove = [{x: tx, y: ty}];
-                    if (tileId === TILES.GREY.id) {
-                        const neighbors = [{x:tx+1, y:ty}, {x:tx-1, y:ty}, {x:tx, y:ty+1}, {x:tx, y:ty-1}];
-                        neighbors.forEach(n => {
-                            if (this.world.getTile(n.x, n.y) === TILES.WOOD_RAIL.id) {
-                                const railNeighbors = [{x:n.x+1, y:n.y}, {x:n.x-1, y:n.y}, {x:n.x, y:n.y+1}, {x:n.x, y:n.y-1}];
-                                const support = railNeighbors.some(rn => (rn.x !== tx || rn.y !== ty) && this.world.getTile(rn.x, rn.y) === TILES.GREY.id);
-                                if (!support) tilesToRemove.push({x: n.x, y: n.y});
-                            }
-                        });
-                    }
-
-                    const isOccupiedOnBreak = tilesToRemove.some(t => isOccupied(t.x, t.y)); 
-
-                    if (isOccupiedOnBreak) {
-                        this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BREAK: OCCUPIED", "#f00");
-                        return;
-                    }
-
+                if (tileId === TILES.GREY.id || tileId === TILES.WOOD_RAIL.id) {
+                    if (isOccupied(tx, ty)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
                     const biome = Utils.getBiome(tx, ty, this.world.seed);
-                    let restoreId = TILES.GRASS.id;
-                    if (biome === TILES.WATER.id) restoreId = TILES.WATER.id;
-                    if (biome === TILES.DEEP_WATER.id) restoreId = TILES.DEEP_WATER.id;
+                    let restoreId = (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) ? biome : TILES.GRASS.id;
                     if (biome === TILES.SAND.id) restoreId = TILES.SAND.id;
 
                     this.world.setTile(tx, ty, restoreId);
-                    
-                    if (!this.godMode) {
-                        if ([12,14,15].includes(tileId)) {
-                             this.player.inventory[TILES.GREY.id] += 4;
-                             this.player.inventory[TILES.WOOD.id] += 1;
-                        } else {
-                             this.player.inventory[tileId]++;
-                        }
-                    }
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 5);
-                    
-                    tilesToRemove.forEach(t => {
-                        if (t.x === tx && t.y === ty) return;
-                        const rBiome = Utils.getBiome(t.x, t.y, this.world.seed);
-                        const rRestore = (rBiome === TILES.WATER.id || rBiome === TILES.DEEP_WATER.id) ? rBiome : TILES.GRASS.id;
-                        this.world.setTile(t.x, t.y, rRestore);
-                        this.spawnParticles(t.x * CONFIG.TILE_SIZE + 16, t.y * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 4);
-                        if (!this.godMode) this.player.inventory[TILES.WOOD.id] += 1;
-                    });
-                    this.recalcCannons();
+                    this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: tileId === TILES.GREY.id ? TILES.GREY.id : TILES.WOOD.id, qty: 1, bob: Math.random()*100});
                     this.updateUI();
                 }
             }
@@ -523,6 +464,8 @@ export default class Game {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
 
+        if (this.shootCooldown > 0) this.shootCooldown--;
+
         this.regenTimer += dt;
         if (this.regenTimer > 2000 && this.player.hp < 100) {
             this.player.hp = Math.min(100, this.player.hp + 5);
@@ -552,6 +495,7 @@ export default class Game {
 
         this.handleInteraction();
 
+        // NPC Spawn
         if (this.npcs.length < CONFIG.MAX_NPCS && Math.random() < CONFIG.NPC_SPAWN_RATE) {
             const ang = Math.random() * 6.28;
             const dist = 600;
@@ -561,11 +505,23 @@ export default class Game {
             const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
             const tile = this.world.getTile(ngx, ngy);
             const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
-
             const isWater = tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
-
             if (elevation < 0.35 && !isWater && !ID_TO_TILE[tile].solid) {
                 this.npcs.push(new Entity(nx, ny, 'npc'));
+            }
+        }
+
+        // Sheep Spawn (Higher chance on Grass)
+        if (this.animals.length < 10 && Math.random() < 0.005) {
+            const ang = Math.random() * 6.28;
+            const dist = 600;
+            const nx = this.player.x + Math.cos(ang)*dist;
+            const ny = this.player.y + Math.sin(ang)*dist;
+            const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
+            const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
+            const tile = this.world.getTile(ngx, ngy);
+            if (tile === TILES.GRASS.id && this.world.getTile(ngx+1, ngy) !== TILES.WATER.id) {
+                this.animals.push(new Sheep(nx, ny));
             }
         }
 
@@ -585,19 +541,37 @@ export default class Game {
                 }
                 if (dx||dy) {
                     npc.move(dx * 20, dy * 20, this.world); 
-                    npc.hp -= 20;
+                    npc.hp -= 5;
                     this.spawnParticles(npc.x, npc.y, '#f00', 5);
-                    this.spawnText(npc.x, npc.y, "20", "#fff");
                 }
             }
         });
+
+        // --- SHEEP LOGIC ---
+        this.animals.forEach(s => {
+            s.updateAI(dt, this.player, this.world);
+            
+            // Breeding Check
+            if (s.fed) {
+                this.animals.forEach(mate => {
+                    if (s !== mate && mate.fed && Utils.distance(s, mate) < 20) {
+                        s.fed = false; mate.fed = false;
+                        const baby = new Sheep(s.x, s.y);
+                        this.animals.push(baby);
+                        this.spawnParticles(s.x, s.y, '#fff', 10);
+                        this.spawnText(s.x, s.y, "BABY!", "#ff00ff");
+                    }
+                });
+            }
+        });
+        // ------------------
         
         this.cannons.forEach(c => {
             if (c.cooldown > 0) c.cooldown--;
             else if (c.ammo > 0) {
                 let target = this.npcs.find(n => Utils.distance(c, n) < c.range);
                 if (target) {
-                    this.projectiles.push({x: c.x, y: c.y - CONFIG.TILE_SIZE, tx: target.x, ty: target.y, dmg: c.damage, active: true});
+                    this.projectiles.push(new Projectile(c.x, c.y - CONFIG.TILE_SIZE, target.x, target.y, c.damage, 12, '#fff', false));
                     c.cooldown = 60;
                     this.spawnParticles(c.x, c.y - CONFIG.TILE_SIZE, '#aaa', 8);
                     if (!this.godMode) c.ammo--;
@@ -606,28 +580,38 @@ export default class Game {
         });
 
         this.projectiles.forEach(p => {
-            const ang = Math.atan2(p.ty - p.y, p.tx - p.x);
-            p.x += Math.cos(ang) * 12; p.y += Math.sin(ang) * 12;
-            this.npcs.forEach(n => {
-                if (Utils.distance(p, n) < 16) {
-                    p.active = false;
-                    n.hp -= p.dmg;
-                    this.spawnParticles(n.x, n.y, '#f00', 6);
-                    this.spawnText(n.x, n.y, Math.floor(p.dmg), "#fff");
-                }
-            });
-            if (Utils.distance(p, {x:p.tx, y:p.ty}) < 10) p.active = false;
+            p.update();
+            if (p.owner === 'player' || p.owner === 'enemy') { 
+                this.npcs.forEach(n => {
+                    if (p.active && Utils.distance(p, n) < 16) {
+                        p.active = false;
+                        n.hp -= p.damage;
+                        this.spawnParticles(n.x, n.y, '#f00', 6);
+                        this.spawnText(n.x, n.y, Math.floor(p.damage), "#fff");
+                    }
+                });
+            }
         });
 
-        this.npcs = this.npcs.filter(n => {
+        this.projectiles = this.projectiles.filter(p => p.active);
+
+        // Cleanup Dead Entities
+        const cleanup = (arr) => arr.filter(n => {
             if (n.hp <= 0) {
                 const roll = Math.random();
                 let dropId = TILES.GREY.id;
-                let qty = 5;
-                if (roll < 0.10) { dropId = TILES.GOLD.id; qty = 2; } 
-                else if (roll < 0.40) { dropId = TILES.WOOD.id; qty = 5; } 
-                else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
-                else { dropId = TILES.GREY.id; qty = 8; }
+                let qty = 1;
+                
+                if (n.type === 'sheep') {
+                     dropId = TILES.WOOL.id; 
+                     qty = 2;
+                } else {
+                     // NPC Drops
+                     if (roll < 0.10) { dropId = TILES.GOLD.id; qty = 2; } 
+                     else if (roll < 0.40) { dropId = TILES.WOOD.id; qty = 5; } 
+                     else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
+                     else { dropId = TILES.GREY.id; qty = 8; }
+                }
 
                 this.loot.push({x: n.x, y: n.y, id: dropId, qty: qty, bob: Math.random()*100});
                 this.spawnParticles(n.x, n.y, '#f00', 10);
@@ -635,7 +619,9 @@ export default class Game {
             }
             return true;
         });
-        this.projectiles = this.projectiles.filter(p => p.active);
+
+        this.npcs = cleanup(this.npcs);
+        this.animals = cleanup(this.animals);
         
         this.particles.forEach(p => p.update());
         this.particles = this.particles.filter(p => p.life > 0);
@@ -651,7 +637,6 @@ export default class Game {
             return true;
         });
 
-        // DEBUG DISPLAY
         this.dom.hp.innerText = Math.floor(this.player.hp);
         const px = Math.floor(this.player.x/CONFIG.TILE_SIZE);
         const py = Math.floor(this.player.y/CONFIG.TILE_SIZE);
@@ -695,6 +680,7 @@ export default class Game {
         };
 
         this.npcs.forEach(n => addToBucket(n, 'npc'));
+        this.animals.forEach(n => addToBucket(n, 'sheep')); // Bucket for Sheep
         addToBucket(this.player, 'player');
         this.loot.forEach(l => addToBucket(l, 'loot'));
 
@@ -778,10 +764,10 @@ export default class Game {
                     }
                 }
 
-                if (id === TILES.MOUNTAIN.id || id === TILES.STONE_BLOCK.id) {
+                if (tile.hp) {
                     const dmg = this.world.getTileDamage(c, r);
                     if (dmg > 0) {
-                        const max = 100;
+                        const max = tile.hp;
                         const w = 24; const h = 4;
                         const bx = tx + 4; const by = ty - 10;
                         this.ctx.fillStyle = '#300';
@@ -873,7 +859,21 @@ export default class Game {
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
+                    } else if (obj._type === 'sheep') {
+                        // DRAW SHEEP
+                        // Body
+                        this.ctx.fillStyle = obj.fed ? '#ffcccc' : (obj.hasWool ? '#eeeeee' : '#aaaaaa');
+                        this.ctx.fillRect(obj.x - 10, obj.y - 10, 20, 14);
+                        // Head
+                        this.ctx.fillStyle = '#111';
+                        this.ctx.fillRect(obj.x + 8, obj.y - 12, 8, 8);
+                        // Legs
+                        this.ctx.fillStyle = '#111';
+                        this.ctx.fillRect(obj.x - 8, obj.y + 4, 4, 6);
+                        this.ctx.fillRect(obj.x + 4, obj.y + 4, 4, 6);
+                        this.drawHealth(obj._orig);
                     } else {
+                        // DRAW PLAYER / NPC
                         const isPlayer = obj._type === 'player';
                         const colorShirt = isPlayer ? '#3498db' : '#993333';
                         const colorPants = isPlayer ? '#8B4513' : '#654321';

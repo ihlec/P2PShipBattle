@@ -15,9 +15,11 @@ MEDIVALPIXELS/
 - save game and load game from browser localStorage
 - HP to all structures
 - Do not spwan close to water
-- Sheep fields for whool
+- Do not spawn when colliding with anything. 
+- Sheep drop whool when harvested. Whool regrows after 10min
 - sheep will alwyas flee from player
-- Two sheep colling have a chance to spwan a new sheep when fed with GRN.
+- sheep have a chance to spwan a new sheep when fed with GRN.
+- sheeps can die from damage by thrown objects
 - Wood walls are now fences that open and close on left click. 
 - Boat structure can be build using wood and whool
 - player can enter boat and leaf boat when boat is next to sand
@@ -29,3 +31,11 @@ MEDIVALPIXELS/
 - npc boats drive torwards the player until land is reached.
 - Then starts spwaning npc minions to attack. 
 - if a player has already killed many npc. The boat drops more and stronger npcs
+- ther is a nother icon next to the building hammer to craft weapons
+- there are two weapons spears and swords
+- the basic sword needs obsidian and wood
+- the better sword iron and gold
+- the basic spear needs obsidian and wood
+- the better spear needs wood and iron
+- the spare can be thrown just like stones
+- the sword increases damage when running into enemies

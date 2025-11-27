@@ -16,18 +16,23 @@ export const TILES = {
     BLACK: { id: 4, color: '#111111', solid: false, name: 'Obsidian', short: 'Obs' }, 
     IRON:  { id: 5, color: '#444444', solid: false, name: 'Iron', short: 'Irn' }, 
     GOLD:  { id: 7, color: '#ffd700', solid: false, name: 'Gold', short: 'Gld' },
-    WALL:  { id: 9, color: '#555555', solid: true, name: 'Wall', short: 'Wal' },
+    
+    // Structures
+    WALL:  { id: 9, color: '#555555', solid: true, name: 'Wall', short: 'Wal', hp: 100 },
     WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
-    STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Boulder', short: 'Bld' }, 
-    TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St' },
-    TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir' },
-    TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd' },
+    STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Boulder', short: 'Bld', hp: 80 }, 
+    TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St', hp: 150 },
+    TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir', hp: 300 },
+    TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd', hp: 500 },
     ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' },
-    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal' },
-    WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral' },
+    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal', hp: 50 },
+    WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral', hp: 30 },
     TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
-    MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt' },
-    GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' }
+    MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt', hp: 200 },
+    GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' },
+    
+    // Items (No block equivalent necessarily, but sharing ID space)
+    WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' }
 };
 
 export const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
