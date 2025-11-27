@@ -16,6 +16,40 @@ export class Particle {
     }
 }
 
+// [NEW] Wind Particle for Screen Space
+export class WindParticle {
+    constructor(screenWidth, screenHeight) {
+        this.x = Math.random() * screenWidth;
+        this.y = Math.random() * screenHeight;
+        this.speed = CONFIG.WIND.SPEED_BASE + Math.random() * CONFIG.WIND.SPEED_VARIATION;
+        this.length = 5 + Math.random() * 15; // Trail length
+        this.thickness = Math.random() > 0.5 ? 1 : 2;
+    }
+
+    update(screenWidth, screenHeight, angle) {
+        const dx = Math.cos(angle) * this.speed;
+        const dy = Math.sin(angle) * this.speed;
+        
+        this.x += dx;
+        this.y += dy;
+
+        // Screen Wrapping (Toroidal)
+        if (this.x < -20) this.x = screenWidth + 20;
+        if (this.x > screenWidth + 20) this.x = -20;
+        if (this.y < -20) this.y = screenHeight + 20;
+        if (this.y > screenHeight + 20) this.y = -20;
+    }
+
+    draw(ctx, angle) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(angle);
+        ctx.fillStyle = CONFIG.WIND.COLOR;
+        ctx.fillRect(0, 0, this.length, this.thickness);
+        ctx.restore();
+    }
+}
+
 export class Projectile {
     constructor(x, y, tx, ty, damage, speed, color, isPlayerOwner, type = 'stone') {
         this.x = x; this.y = y;
@@ -108,18 +142,12 @@ export class Entity {
             stats.rudder *= 0.9;
         }
 
-        // [NEW] Wind Physics
-        // Calculate efficiency based on angle difference between Boat Heading and Wind Angle
-        // Cosine: 1.0 (Tailwind), 0.0 (Side), -1.0 (Headwind)
-        // Map to: 1.2 (Tailwind), 0.8 (Side), 0.2 (Headwind)
+        // Wind Physics Efficiency
         let windEfficiency = 1.0;
-        
         if (stats.sailLevel > 0) {
             const angleDiff = stats.heading - wind.angle;
             const cos = Math.cos(angleDiff); 
-            // Normalize (-1 to 1) -> (0 to 1)
             const normalized = (cos + 1) / 2; 
-            // Map 0..1 to 0.2..1.2
             windEfficiency = 0.2 + (normalized * 1.0);
         }
 

@@ -2,7 +2,7 @@ import { CONFIG, TILES, ID_TO_TILE, BLUEPRINTS, WEAPONS } from './config.js';
 import Utils from './utils.js';
 import InputHandler from './input.js';
 import World from './world.js';
-import { Entity, Particle, Projectile, Sheep, Boat } from './entities.js';
+import { Entity, Particle, Projectile, Sheep, Boat, WindParticle } from './entities.js';
 
 export default class Game {
     constructor() {
@@ -46,6 +46,9 @@ export default class Game {
         this.texts = [];
         this.cannons = []; 
         
+        // [NEW] Wind Particles
+        this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
+
         this.camera = { x: 0, y: 0 };
         this.zoom = 1;
         this.lastTime = 0;
@@ -157,7 +160,12 @@ export default class Game {
         menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
     }
 
-    resize() { this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; }
+    resize() { 
+        this.canvas.width = window.innerWidth; 
+        this.canvas.height = window.innerHeight; 
+        // Re-init wind particles on resize to fill screen
+        this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
+    }
 
     showMessage(text, color) {
         const msg = document.getElementById('messages');
@@ -750,8 +758,11 @@ export default class Game {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
         
-        // [NEW] Update global wind
+        // Update global wind
         this.world.update(dt);
+        
+        // [NEW] Update Wind Particles (Screen Space)
+        this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle));
 
         if (this.shootCooldown > 0) this.shootCooldown--;
 
@@ -1468,38 +1479,21 @@ export default class Game {
             this.ctx.stroke();
         }
         
-        // [NEW] Wind Indicator (Top Right)
-        const wx = this.canvas.width - 50;
-        const wy = 50;
-        this.ctx.save();
-        this.ctx.translate(wx, wy);
-        this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        this.ctx.beginPath();
-        this.ctx.arc(0, 0, 30, 0, Math.PI*2);
-        this.ctx.fill();
-        
-        this.ctx.rotate(this.world.wind.angle);
-        this.ctx.strokeStyle = '#fff';
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        this.ctx.moveTo(-10, -10);
-        this.ctx.lineTo(0, 10);
-        this.ctx.lineTo(10, -10);
-        this.ctx.lineTo(0, -5);
-        this.ctx.closePath();
-        this.ctx.stroke();
-        this.ctx.restore();
+        this.ctx.restore(); // Undo Camera
 
-        this.ctx.fillStyle = '#fff';
-        this.ctx.font = "10px monospace";
-        this.ctx.fillText("WIND", wx-12, wy+45);
-        
+        // [NEW] Draw Wind Particles in Screen Space (After restore)
+        this.windParticles.forEach(p => p.draw(this.ctx, this.world.wind.angle));
+
         this.ctx.font = "bold 14px monospace";
+        // To draw texts in world space, we must re-apply camera or refactor text system.
+        // For simplicity, let's re-apply camera just for texts (as they were in world space)
+        this.ctx.save();
+        this.ctx.scale(this.zoom, this.zoom);
+        this.ctx.translate(-this.camera.x, -this.camera.y);
         this.texts.forEach(t => {
             this.ctx.fillStyle = t.col;
             this.ctx.fillText(t.txt, t.x, t.y);
         });
-
         this.ctx.restore();
     }
 
@@ -1510,4 +1504,4 @@ export default class Game {
         this.draw();
         requestAnimationFrame(t => this.loop(t));
     }
-}
+}ds

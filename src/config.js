@@ -1,4 +1,4 @@
-import { CONFIG as OLD_CONFIG, TILES as OLD_TILES, BLUEPRINTS as OLD_BP, WEAPONS as OLD_WP } from './config.js'; // Hack to keep referencing current file if needed, but standard export below is correct.
+import { CONFIG as OLD_CONFIG, TILES as OLD_TILES, BLUEPRINTS as OLD_BP, WEAPONS as OLD_WP } from './config.js';
 
 export const CONFIG = {
     TILE_SIZE: 32,
@@ -14,11 +14,19 @@ export const CONFIG = {
     // Age of Sail Physics
     BOAT: {
         ACCELERATION: 0.05,
-        DECELERATION: 0.02, // Water drag
+        DECELERATION: 0.02,
         MAX_SPEED: 4.5,
-        RUDDER_SPEED: 0.03, // How fast the wheel turns
-        MAX_RUDDER: 0.04,   // Max turning angle per frame
-        TURN_FACTOR: 0.8    // Turning effectiveness based on speed
+        RUDDER_SPEED: 0.03, 
+        MAX_RUDDER: 0.04,   
+        TURN_FACTOR: 0.8    
+    },
+
+    // Visual Wind Settings
+    WIND: {
+        PARTICLE_COUNT: 150,
+        COLOR: 'rgba(255, 255, 255, 0.08)', 
+        SPEED_BASE: 1,      // Reduced from 2
+        SPEED_VARIATION: 1.5 // Reduced from 3
     }
 };
 
