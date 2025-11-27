@@ -40,3 +40,4 @@ MEDIVALPIXELS/
 - the sword increases damage when running into enemies
 - ships are big multile battleships with cannons to their sides
 - ships and boats have unique movement mechanics. They have a direction and speed that only changes slowly. So manoverability needs skill and planning.
+- hostile ships and boats should have a black flag. Own ships should have a white flag.

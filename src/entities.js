@@ -154,16 +154,15 @@ export class Boat extends Entity {
         this.isLanded = false;
         
         // Invasion Logic
-        this.activeMinion = null; // Track the single active unit
+        this.activeMinion = null; 
         this.respawnTimer = 0;
-        this.nextRespawnTime = 0; // Immediate spawn on first landing
+        this.nextRespawnTime = 0; 
     }
 
     updateAI(dt, player, world, game) {
         if (this.owner !== 'enemy') return;
 
         if (this.isLanded) {
-            // Check if our minion is still alive and present in the game
             const minionAlive = this.activeMinion && 
                                 this.activeMinion.hp > 0 && 
                                 game.npcs.includes(this.activeMinion);
@@ -171,9 +170,7 @@ export class Boat extends Entity {
             if (!minionAlive) {
                 this.respawnTimer++;
                 
-                // Wait for cooldown
                 if (this.respawnTimer > this.nextRespawnTime) {
-                    // Spawn logic
                     const angle = Math.atan2(player.y - this.y, player.x - this.x);
                     const spawnX = this.x + Math.cos(angle) * 32;
                     const spawnY = this.y + Math.sin(angle) * 32;
@@ -183,14 +180,10 @@ export class Boat extends Entity {
                     this.activeMinion = minion;
                     
                     game.spawnParticles(this.x, this.y, '#ff0000', 8);
-                    game.spawnText(this.x, this.y, "REINFORCEMENTS!", "#f00");
+                    game.spawnText(this.x, this.y, "INVASION!", "#f00"); // Changed from REINFORCEMENTS
 
-                    // Reset Timer
                     this.respawnTimer = 0;
                     
-                    // Calc next wait: 2 to 20 mins @ 60fps
-                    // 2 mins = 120s = 7200 frames
-                    // 20 mins = 1200s = 72000 frames
                     const minFrames = 7200;
                     const maxFrames = 72000;
                     this.nextRespawnTime = minFrames + Math.random() * (maxFrames - minFrames);
@@ -199,18 +192,16 @@ export class Boat extends Entity {
                 }
             }
         } else {
-            // Move towards player
             const angle = Math.atan2(player.y - this.y, player.x - this.x);
             const prevX = this.x;
             const prevY = this.y;
             
             this.move(Math.cos(angle) * 1.0, Math.sin(angle) * 1.0, world); 
 
-            // Check if stuck/landed
             if (Math.abs(this.x - prevX) < 0.1 && Math.abs(this.y - prevY) < 0.1) {
                 this.isLanded = true;
                 game.spawnText(this.x, this.y, "INVASION!", "#f00");
             }
         }
     }
-}s
+}

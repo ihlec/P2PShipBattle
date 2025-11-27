@@ -51,6 +51,10 @@ export default class Game {
         this.activeBlueprint = null;
         this.shootCooldown = 0;
         
+        // Invasion Timers
+        this.invasionTimer = 0;
+        this.nextInvasionTime = 0; // First one can be immediate or slightly delayed
+        
         this.dom = {
             hp: document.getElementById('hp'),
             coords: document.getElementById('coords'),
@@ -89,7 +93,8 @@ export default class Game {
                 inventory: this.player.inventory, inBoat: this.player.inBoat 
             },
             world: this.world.exportData(),
-            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp, owner: b.owner})) 
+            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp, owner: b.owner})),
+            invasion: { timer: this.invasionTimer, next: this.nextInvasionTime }
         };
         try { localStorage.setItem('pixelWarfareSave', JSON.stringify(data)); this.showMessage("GAME SAVED", "#0f0"); } 
         catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
@@ -107,6 +112,12 @@ export default class Game {
             this.player.inBoat = data.player.inBoat || false; 
             this.player.isMoving = false;
             
+            // Restore invasion timers
+            if (data.invasion) {
+                this.invasionTimer = data.invasion.timer || 0;
+                this.nextInvasionTime = data.invasion.next || 0;
+            }
+
             this.npcs = []; this.animals = []; this.projectiles = []; this.particles = []; this.loot = []; this.texts = [];
             
             this.boats = (data.boats || []).map(b => {
@@ -579,27 +590,37 @@ export default class Game {
         this.handleInteraction();
 
         // --- ENEMY BOAT SPAWN LOGIC ---
-        // 1. Check if an enemy boat already exists (Limit: 1)
         const enemyBoat = this.boats.find(b => b.owner === 'enemy');
         
         if (!enemyBoat) {
-            // 2. Try to spawn one at a random angle, distance 600-800
-            if (Math.random() < 0.01) { // 1% chance per frame if not exists
-                const angle = Math.random() * Math.PI * 2;
-                const dist = 600 + Math.random() * 200;
-                const sx = this.player.x + Math.cos(angle) * dist;
-                const sy = this.player.y + Math.sin(angle) * dist;
-                const gx = Math.floor(sx / CONFIG.TILE_SIZE);
-                const gy = Math.floor(sy / CONFIG.TILE_SIZE);
-                
-                // Only spawn if tile is Water or Deep Water
-                const tile = this.world.getTile(gx, gy);
-                if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
-                    this.boats.push(new Boat(sx, sy, 'enemy'));
+            this.invasionTimer++;
+            if (this.invasionTimer > this.nextInvasionTime) {
+                // Try spawn
+                if (Math.random() < 0.1) { 
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 600 + Math.random() * 200;
+                    const sx = this.player.x + Math.cos(angle) * dist;
+                    const sy = this.player.y + Math.sin(angle) * dist;
+                    const gx = Math.floor(sx / CONFIG.TILE_SIZE);
+                    const gy = Math.floor(sy / CONFIG.TILE_SIZE);
+                    
+                    const tile = this.world.getTile(gx, gy);
+                    if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
+                        this.boats.push(new Boat(sx, sy, 'enemy'));
+                        this.spawnText(sx, sy, "NEW INVASION", "#f00");
+                        
+                        // Reset Invasion Timer (2-20 mins)
+                        this.invasionTimer = 0;
+                        const minFrames = 7200; // 2 mins
+                        const maxFrames = 72000; // 20 mins
+                        this.nextInvasionTime = minFrames + Math.random() * (maxFrames - minFrames);
+                        console.log(`Next Boat Invasion in ${(this.nextInvasionTime/60/60).toFixed(2)} mins`);
+                    }
                 }
             }
         } else {
-            // 3. Update existing enemy boat logic
+            // Boat exists, reset timer just in case
+            this.invasionTimer = 0;
             enemyBoat.updateAI(dt, this.player, this.world, this);
         }
         // ----------------------------------------
@@ -992,7 +1013,7 @@ export default class Game {
                         this.ctx.fillRect(obj.x - 2, obj.y - 16, 4, 16);
                         
                         // Sail
-                        this.ctx.fillStyle = '#fff';
+                        this.ctx.fillStyle = obj._orig.owner === 'enemy' ? '#000' : '#fff'; // Flag logic
                         this.ctx.beginPath();
                         this.ctx.moveTo(obj.x, obj.y - 16);
                         this.ctx.lineTo(obj.x + 12, obj.y - 10);
@@ -1039,7 +1060,7 @@ export default class Game {
                         if (inBoat) {
                             this.ctx.fillStyle = '#8B4513';
                             this.ctx.fillRect(obj.x - 12, obj.y - 2, 24, 12);
-                            this.ctx.fillStyle = '#fff'; // Sail
+                            this.ctx.fillStyle = '#fff'; // Sail (Player riding = white flag)
                             this.ctx.beginPath();
                             this.ctx.moveTo(obj.x, obj.y - 16);
                             this.ctx.lineTo(obj.x + 12, obj.y - 10);
@@ -1171,4 +1192,4 @@ export default class Game {
         this.draw();
         requestAnimationFrame(t => this.loop(t));
     }
-}
+}a
