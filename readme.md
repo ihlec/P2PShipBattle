@@ -40,3 +40,5 @@ MEDIVALPIXELS/
 - the better spear needs wood and iron
 - the spare can be thrown just like stones
 - the sword increases damage when running into enemies
+- ships are big multile battleships with cannons to their sides
+- ships and boats have unique movement mechanics. They have a direction and speed that only changes slowly. So manoverability needs skill and planning.

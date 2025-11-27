@@ -36,7 +36,7 @@ export default class Game {
 
         this.npcs = [];
         this.animals = []; 
-        this.boats = []; // NEW: Track placed boats
+        this.boats = []; 
         this.loot = [];
         this.projectiles = [];
         this.particles = [];
@@ -89,7 +89,7 @@ export default class Game {
                 inventory: this.player.inventory, inBoat: this.player.inBoat 
             },
             world: this.world.exportData(),
-            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp})) // Save boats
+            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp})) 
         };
         try { localStorage.setItem('pixelWarfareSave', JSON.stringify(data)); this.showMessage("GAME SAVED", "#0f0"); } 
         catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
@@ -104,12 +104,11 @@ export default class Game {
             this.dom.seed.innerText = this.world.seed;
             this.player.x = data.player.x; this.player.y = data.player.y;
             this.player.hp = data.player.hp; this.player.inventory = data.player.inventory || {};
-            this.player.inBoat = data.player.inBoat || false; // Restore boat state
+            this.player.inBoat = data.player.inBoat || false; 
             this.player.isMoving = false;
             
             this.npcs = []; this.animals = []; this.projectiles = []; this.particles = []; this.loot = []; this.texts = [];
             
-            // Restore boats
             this.boats = (data.boats || []).map(b => {
                 const boat = new Boat(b.x, b.y);
                 boat.hp = b.hp;
@@ -317,9 +316,7 @@ export default class Game {
                 if (occupied) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
 
                 if (affordable) {
-                    // --- NEW: BOAT BUILDING LOGIC ---
                     if (this.activeBlueprint.special === 'boat') {
-                        // Can place on Water OR Sand
                         const targetId = this.world.getTile(gx, gy);
                         const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id, TILES.SAND.id];
                         if (!allowed.includes(targetId)) {
@@ -331,9 +328,8 @@ export default class Game {
                         for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
                         this.spawnParticles((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16, '#8B4513', 8);
                         this.updateUI();
-                        return; // Skip normal tile building
+                        return; 
                     }
-                    // --------------------------------
 
                     const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
 
@@ -384,15 +380,11 @@ export default class Game {
             }
         } else if (this.input.mouse.clickedRight) {
             
-            // --- NEW: BOAT INTERACTION (ENTER/LEAVE) ---
             if (this.player.inBoat) {
-                // EXIT BOAT Logic
                 const clickedTile = this.world.getTile(gx, gy);
                 if (clickedTile === TILES.SAND.id || clickedTile === TILES.GRASS.id) {
-                    // Can only exit onto land
                     const dist = Utils.distance(this.player, {x: mx, y: my});
                     if (dist < 60) {
-                        // FIX: Save boat position (water) BEFORE moving player to land
                         const boatSpawnX = this.player.x;
                         const boatSpawnY = this.player.y;
 
@@ -400,7 +392,6 @@ export default class Game {
                         this.player.x = (gx * CONFIG.TILE_SIZE) + 16;
                         this.player.y = (gy * CONFIG.TILE_SIZE) + 16;
                         
-                        // Spawn ONE boat at the old position
                         this.boats.push(new Boat(boatSpawnX, boatSpawnY));
                         
                         this.spawnText(this.player.x, this.player.y, "EXIT BOAT", "#fff");
@@ -408,20 +399,18 @@ export default class Game {
                     }
                 }
             } else {
-                // ENTER BOAT Logic
                 const clickedBoatIndex = this.boats.findIndex(b => Utils.distance(b, {x:mx, y:my}) < 32);
                 if (clickedBoatIndex !== -1) {
                     if (Utils.distance(this.player, this.boats[clickedBoatIndex]) < 60) {
                         this.player.inBoat = true;
                         this.player.x = this.boats[clickedBoatIndex].x;
                         this.player.y = this.boats[clickedBoatIndex].y;
-                        this.boats.splice(clickedBoatIndex, 1); // Remove entity, player becomes boat
+                        this.boats.splice(clickedBoatIndex, 1);
                         this.spawnText(this.player.x, this.player.y, "ENTER BOAT", "#fff");
                         return;
                     }
                 }
             }
-            // -------------------------------------------
 
             const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
@@ -598,7 +587,6 @@ export default class Game {
             const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
             const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
             
-            // Collision check before spawning
             const spawnPoint = {x: nx, y: ny};
             const occupied = [...this.npcs, ...this.animals].some(e => Utils.distance(e, spawnPoint) < CONFIG.TILE_SIZE);
             
@@ -690,7 +678,8 @@ export default class Game {
         this.projectiles.forEach(p => {
             p.update();
             if (p.owner === 'player' || p.owner === 'enemy') { 
-                const potentialTargets = [...this.npcs, ...this.animals];
+                // NEW: Added this.boats to potential targets
+                const potentialTargets = [...this.npcs, ...this.animals, ...this.boats];
                 potentialTargets.forEach(n => {
                     if (p.active && Utils.distance(p, n) < 16) {
                         p.active = false;
@@ -730,6 +719,17 @@ export default class Game {
         this.npcs = cleanup(this.npcs);
         this.animals = cleanup(this.animals);
         
+        // NEW: Boat cleanup logic
+        this.boats = this.boats.filter(b => {
+             if (b.hp <= 0) {
+                 this.loot.push({x: b.x, y: b.y, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
+                 this.loot.push({x: b.x, y: b.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
+                 this.spawnParticles(b.x, b.y, '#8B4513', 10);
+                 return false;
+             }
+             return true;
+        });
+
         this.particles.forEach(p => p.update());
         this.particles = this.particles.filter(p => p.life > 0);
         this.texts.forEach(t => { t.y += t.dy; t.life--; });
@@ -760,7 +760,6 @@ export default class Game {
     }
 
     drawHealth(e) {
-        // FIXED: Only show HP bar if damaged
         if (e.hp >= e.maxHp) return;
         
         const w = 24, h = 4;
@@ -791,7 +790,7 @@ export default class Game {
 
         this.npcs.forEach(n => addToBucket(n, 'npc'));
         this.animals.forEach(n => addToBucket(n, 'sheep')); 
-        this.boats.forEach(n => addToBucket(n, 'boat')); // NEW: Render Boats
+        this.boats.forEach(n => addToBucket(n, 'boat')); 
         addToBucket(this.player, 'player');
         this.loot.forEach(l => addToBucket(l, 'loot'));
 
@@ -995,6 +994,8 @@ export default class Game {
                         this.ctx.lineTo(obj.x + 12, obj.y - 10);
                         this.ctx.lineTo(obj.x, obj.y - 4);
                         this.ctx.fill();
+                        
+                        this.drawHealth(obj._orig); // Show Boat Health
                     } else if (obj._type === 'loot') {
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
@@ -1029,9 +1030,8 @@ export default class Game {
                     } else {
                         // PLAYER/NPC
                         const isPlayer = obj._type === 'player';
-                        const inBoat = isPlayer && obj._orig.inBoat; // Check if this entity is in a boat
+                        const inBoat = isPlayer && obj._orig.inBoat; 
 
-                        // If in boat, draw the boat under them
                         if (inBoat) {
                             this.ctx.fillStyle = '#8B4513';
                             this.ctx.fillRect(obj.x - 12, obj.y - 2, 24, 12);
@@ -1048,10 +1048,11 @@ export default class Game {
                         const colorSkin = isPlayer ? '#ffcc99' : '#e0b090';
                         const colorHelmet = '#8B6F43';
                         const colorBoots = '#333333';
-
-                        const isMoving = obj._orig.isMoving;
-                        const tick = isMoving ? (obj._orig.moveTime * 0.015) : (Date.now() * 0.005);
                         
+                        // NEW: Force idle animation if in boat
+                        const isMoving = obj._orig.isMoving && !inBoat; 
+                        
+                        const tick = isMoving ? (obj._orig.moveTime * 0.015) : (Date.now() * 0.005);
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
                         
                         const stride = 4;
@@ -1065,7 +1066,6 @@ export default class Game {
                         const BODY_W = 16;
                         const BODY_X = obj.x - BODY_W / 2;
                         
-                        // Only draw shadow if not in boat (boat has its own presence)
                         if (!inBoat) {
                             this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
                             this.ctx.beginPath();
