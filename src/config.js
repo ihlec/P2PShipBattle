@@ -19,11 +19,16 @@ export const CONFIG = {
         RUDDER_SPEED: 0.03, 
         MAX_RUDDER: 0.04,   
         TURN_FACTOR: 0.8,
-        // [NEW] Combat Stats
-        BROADSIDE_COOLDOWN: 120, // Frames (2 seconds)
+        
+        BROADSIDE_COOLDOWN: 120, // Player Cooldown
         CANNON_SPEED: 12,
         CANNON_DAMAGE: 50,
-        CANNON_RANGE: 60
+        CANNON_RANGE: 30,
+
+        // [NEW] Enemy Stats
+        ENEMY_COOLDOWN: 180,     // Slower than player
+        ENEMY_DETECT_RANGE: 500,
+        ENEMY_ENGAGE_RANGE: 250  // Distance they try to maintain
     },
 
     // Visual Wind Settings

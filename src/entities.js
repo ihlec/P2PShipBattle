@@ -62,7 +62,16 @@ export class Projectile {
         this.dx = Math.cos(this.angle) * speed;
         this.dy = Math.sin(this.angle) * speed;
     }
-    update() { this.x += this.dx; this.y += this.dy; this.life--; if (this.life <= 0) this.active = false; }
+    update() { 
+        this.x += this.dx; 
+        this.y += this.dy; 
+        this.life--; 
+        if (this.life <= 0) {
+            this.active = false; 
+            return 'expired'; 
+        }
+        return 'active';
+    }
     draw(ctx, camX, camY) {
         if (this.type === 'spear') {
             ctx.save();
@@ -113,8 +122,6 @@ export class Entity {
             speed: 0,         
             rudder: 0,        
             sailLevel: 0,
-            
-            // [NEW] Combat State
             cooldownLeft: 0,
             cooldownRight: 0
         };
@@ -128,51 +135,43 @@ export class Entity {
         };
     }
     
-    // [NEW] Fire Broadside Cannons
-    shootBroadside(game, side) { // side: 'left' or 'right'
+    shootBroadside(game, side) { 
         const stats = this.boatStats;
         if (side === 'left' && stats.cooldownLeft > 0) return;
         if (side === 'right' && stats.cooldownRight > 0) return;
 
-        // Determine Angle (Perpendicular to Heading)
         let fireAngle = stats.heading + (side === 'right' ? Math.PI/2 : -Math.PI/2);
         
         // Fire Salvo of 3
-        const offsets = [-10, 0, 10]; // Offset along the ship length
+        const offsets = [-10, 0, 10]; 
         offsets.forEach(off => {
-            // Calculate spawn position based on offset along ship hull
             const spawnX = this.x + Math.cos(stats.heading) * off;
             const spawnY = this.y + Math.sin(stats.heading) * off;
 
-            // Target is simply far away in the fire direction
             const tx = spawnX + Math.cos(fireAngle) * 100;
             const ty = spawnY + Math.sin(fireAngle) * 100;
+
+            const isPlayer = this.type === 'player' || (this.type === 'boat' && this.owner === 'player');
 
             const proj = new Projectile(
                 spawnX, spawnY, tx, ty, 
                 CONFIG.BOAT.CANNON_DAMAGE, 
                 CONFIG.BOAT.CANNON_SPEED, 
-                '#000', true, 'cannonball'
+                '#000', isPlayer, 'cannonball'
             );
             proj.life = CONFIG.BOAT.CANNON_RANGE;
             
-            // Add slight spread to individual shots
             proj.angle += (Math.random() - 0.5) * 0.1;
             proj.dx = Math.cos(proj.angle) * CONFIG.BOAT.CANNON_SPEED;
             proj.dy = Math.sin(proj.angle) * CONFIG.BOAT.CANNON_SPEED;
 
             game.projectiles.push(proj);
-            
-            // Spawn Smoke
             game.spawnParticles(spawnX + Math.cos(fireAngle)*10, spawnY + Math.sin(fireAngle)*10, '#ddd', 5);
         });
 
-        // Set Cooldown
-        if (side === 'left') stats.cooldownLeft = CONFIG.BOAT.BROADSIDE_COOLDOWN;
-        if (side === 'right') stats.cooldownRight = CONFIG.BOAT.BROADSIDE_COOLDOWN;
-        
-        // Spawn Text
-        game.spawnText(this.x, this.y - 20, "FIRE!", "#fff");
+        const cd = (this.owner === 'enemy') ? CONFIG.BOAT.ENEMY_COOLDOWN : CONFIG.BOAT.BROADSIDE_COOLDOWN;
+        if (side === 'left') stats.cooldownLeft = cd;
+        if (side === 'right') stats.cooldownRight = cd;
     }
 
     updateBoatMovement(input, dt, world) {
@@ -180,7 +179,6 @@ export class Entity {
         const cfg = CONFIG.BOAT;
         const wind = world.wind;
 
-        // Cooldown Tick
         if (stats.cooldownLeft > 0) stats.cooldownLeft--;
         if (stats.cooldownRight > 0) stats.cooldownRight--;
 
@@ -334,19 +332,86 @@ export class Boat extends Entity {
         this.activeMinion = null; 
         this.respawnTimer = 0;
         this.nextRespawnTime = 0; 
+        
+        // 30 seconds (1800 frames) to 5 minutes (18000 frames)
+        this.travelTimer = (this.owner === 'enemy') ? 1800 + Math.random() * 16200 : 0;
     }
 
     updateAI(dt, player, world, game) {
         if (this.owner !== 'enemy') return;
 
-        if (this.isLanded) {
+        const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
+        const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
+        const tile = world.getTile(gx, gy);
+        const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
+
+        if (!this.isLanded && isWater) {
+            
+            // Check travel timer
+            if (this.travelTimer > 0) {
+                this.travelTimer--;
+            }
+
+            const dist = Utils.distance(this, player);
+            const input = { up: false, down: false, left: false, right: false };
+            
+            // --- STEERING LOGIC ---
+            const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+            let heading = this.boatStats.heading % (Math.PI * 2);
+            if (heading > Math.PI) heading -= Math.PI * 2;
+            if (heading < -Math.PI) heading += Math.PI * 2;
+
+            let desiredAngle = angleToPlayer;
+
+            if (this.travelTimer > 0) {
+                // PATROL MODE: Circle player or keep distance
+                desiredAngle = angleToPlayer + Math.PI / 2;
+                if (dist > 600) desiredAngle = angleToPlayer + Math.PI / 4;
+            } else {
+                // INVASION/ATTACK MODE
+                if (dist < CONFIG.BOAT.ENEMY_ENGAGE_RANGE) {
+                    desiredAngle = angleToPlayer + Math.PI / 2; // Flank to fire
+                } else {
+                    desiredAngle = angleToPlayer; // Chase
+                }
+            }
+
+            let diff = desiredAngle - heading;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+
+            if (Math.abs(diff) > 0.1) {
+                if (diff > 0) input.right = true;
+                else input.left = true;
+            }
+
+            if (Math.abs(diff) < 1.0) input.up = true;
+            else input.up = true; 
+
+            this.updateBoatMovement(input, dt, world);
+
+            // --- FIRING LOGIC ---
+            const angleToTarget = Math.atan2(player.y - this.y, player.x - this.x);
+            let angleRelative = angleToTarget - heading;
+            while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
+            while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
+
+            const broadsideThreshold = 0.4; 
+            
+            if (Math.abs(angleRelative - (-Math.PI/2)) < broadsideThreshold) {
+                this.shootBroadside(game, 'left');
+            }
+            if (Math.abs(angleRelative - (Math.PI/2)) < broadsideThreshold) {
+                this.shootBroadside(game, 'right');
+            }
+
+        } else if (this.isLanded) {
             const minionAlive = this.activeMinion && 
                                 this.activeMinion.hp > 0 && 
                                 game.npcs.includes(this.activeMinion);
 
             if (!minionAlive) {
                 this.respawnTimer++;
-                
                 if (this.respawnTimer > this.nextRespawnTime) {
                     const angle = Math.atan2(player.y - this.y, player.x - this.x);
                     const spawnX = this.x + Math.cos(angle) * 32;
@@ -364,11 +429,10 @@ export class Boat extends Entity {
                     const minFrames = 7200;
                     const maxFrames = 72000;
                     this.nextRespawnTime = minFrames + Math.random() * (maxFrames - minFrames);
-                    
-                    console.log(`Next invasion spawn in ${(this.nextRespawnTime/60/60).toFixed(2)} mins`);
                 }
             }
         } else {
+            // Transition from Water to Land (Beaching)
             const angle = Math.atan2(player.y - this.y, player.x - this.x);
             const prevX = this.x;
             const prevY = this.y;
@@ -377,7 +441,8 @@ export class Boat extends Entity {
 
             if (Math.abs(this.x - prevX) < 0.1 && Math.abs(this.y - prevY) < 0.1) {
                 this.isLanded = true;
-                game.spawnText(this.x, this.y, "INVASION!", "#f00");
+                this.boatStats.speed = 0; 
+                game.spawnText(this.x, this.y, "LANDED!", "#f00");
             }
         }
     }

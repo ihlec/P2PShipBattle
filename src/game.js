@@ -751,15 +751,56 @@ export default class Game {
         }
     }
 
+    drawBoat(ctx, x, y, heading, owner, hp, maxHp) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(heading);
+        
+        // Hull
+        const w = 48; const h = 24; 
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(-w/2, -h/2, w, h);
+        
+        // Deck
+        ctx.fillStyle = '#5C3317';
+        ctx.fillRect(-w/3, -h/3, w*0.6, h*0.6); 
+        
+        // Cannons
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-10, -h/2 - 2, 4, 4);
+        ctx.fillRect(6, -h/2 - 2, 4, 4);
+        ctx.fillRect(-10, h/2 - 2, 4, 4);
+        ctx.fillRect(6, h/2 - 2, 4, 4);
+
+        // Mast
+        ctx.fillStyle = '#333';
+        ctx.fillRect(4, -8, 8, 8); 
+
+        // Sail
+        ctx.fillStyle = owner === 'enemy' ? '#000' : '#fff'; 
+        ctx.beginPath();
+        ctx.moveTo(8, -32);
+        ctx.lineTo(32, 0); 
+        ctx.lineTo(8, 8);
+        ctx.fill();
+
+        ctx.restore();
+        
+        // Health Bar above
+        const barW = 24, barH = 4;
+        const bx = x - barW/2, by = y - 40;
+        if (hp < maxHp) {
+            ctx.fillStyle = '#300'; ctx.fillRect(bx, by, barW, barH);
+            ctx.fillStyle = '#0f0'; ctx.fillRect(bx, by, barW * (Math.max(0,hp)/maxHp), barH);
+        }
+    }
+
     update(dt) {
         if (this.input.wheel !== 0) {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
         
-        // Update global wind
         this.world.update(dt);
-        
-        // Update Wind Particles (Screen Space)
         this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle));
 
         if (this.shootCooldown > 0) this.shootCooldown--;
@@ -771,7 +812,6 @@ export default class Game {
             this.regenTimer = 0;
         }
 
-        // MOVEMENT LOGIC
         const inputState = {
             up: this.input.keys['w'] || this.input.keys['arrowup'],
             down: this.input.keys['s'] || this.input.keys['arrowdown'],
@@ -780,7 +820,6 @@ export default class Game {
         };
 
         if (this.player.inBoat) {
-            // [NEW] Check for Broadside Fire
             if (this.input.keys['q']) this.player.shootBroadside(this, 'left');
             if (this.input.keys['e']) this.player.shootBroadside(this, 'right');
             
@@ -810,13 +849,11 @@ export default class Game {
 
         this.handleInteraction();
 
-        // --- ENEMY BOAT SPAWN LOGIC ---
         const enemyBoat = this.boats.find(b => b.owner === 'enemy');
         
         if (!enemyBoat) {
             this.invasionTimer++;
             if (this.invasionTimer > this.nextInvasionTime) {
-                // Try spawn
                 if (Math.random() < 0.1) { 
                     const angle = Math.random() * Math.PI * 2;
                     const dist = 600 + Math.random() * 200;
@@ -830,72 +867,57 @@ export default class Game {
                         this.boats.push(new Boat(sx, sy, 'enemy'));
                         this.spawnText(sx, sy, "NEW INVASION", "#f00");
                         
-                        // Reset Invasion Timer (2-20 mins)
                         this.invasionTimer = 0;
-                        const minFrames = 7200; // 2 mins
-                        const maxFrames = 72000; // 20 mins
+                        const minFrames = 7200; 
+                        const maxFrames = 72000;
                         this.nextInvasionTime = minFrames + Math.random() * (maxFrames - minFrames);
                         console.log(`Next Boat Invasion in ${(this.nextInvasionTime/60/60).toFixed(2)} mins`);
                     }
                 }
             }
         } else {
-            // Boat exists, reset timer just in case
             this.invasionTimer = 0;
             enemyBoat.updateAI(dt, this.player, this.world, this);
         }
-        // ----------------------------------------
 
-        // NPC AI LOGIC OVERHAUL: CHASE -> CHARGE -> REST
         this.npcs.forEach(npc => {
-            // Initialize AI state if missing
             if (!npc.aiState) npc.aiState = { mode: 'chase', tx: 0, ty: 0, timer: 0 };
 
             if (npc.aiState.timer > 0) {
-                // Resting
                 npc.aiState.timer--;
                 npc.isMoving = false;
             } else if (npc.aiState.mode === 'chase') {
                 const dist = Utils.distance(npc, this.player);
-                
-                // Transition to Charge if close (approx 2-3 tiles)
                 if (dist < 80) {
                     npc.aiState.mode = 'charge';
-                    // Calculate Overrun Target (Point behind player)
                     const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
                     const overrunDist = 150; 
                     npc.aiState.tx = this.player.x + Math.cos(angle) * overrunDist;
                     npc.aiState.ty = this.player.y + Math.sin(angle) * overrunDist;
                 } else {
-                    // Normal Chase
                     const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
                     npc.move(Math.cos(angle) * 2, Math.sin(angle) * 2, this.world);
                     npc.isMoving = true;
                     npc.moveTime += dt;
                 }
             } else if (npc.aiState.mode === 'charge') {
-                // Move towards locked target
                 const dx = npc.aiState.tx - npc.x;
                 const dy = npc.aiState.ty - npc.y;
                 const distToTarget = Math.sqrt(dx*dx + dy*dy);
                 
                 if (distToTarget < 10) {
-                    // Reached target -> Rest
                     npc.aiState.mode = 'rest';
-                    npc.aiState.timer = 60 + Math.random() * 60; // 1-2 sec pause
+                    npc.aiState.timer = 60 + Math.random() * 60; 
                 } else {
                     const angle = Math.atan2(dy, dx);
-                    // Charging is slightly faster
                     const moved = npc.move(Math.cos(angle) * 3.5, Math.sin(angle) * 3.5, this.world);
                     npc.isMoving = true;
                     npc.moveTime += dt;
                 }
             } else if (npc.aiState.mode === 'rest') {
-                // Handled by timer check above. When timer hits 0:
                 npc.aiState.mode = 'chase';
             }
 
-            // Damage Logic (Always active if touching)
             if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
                 if (!this.godMode) {
                     this.player.damageBuffer += 0.5; 
@@ -907,8 +929,7 @@ export default class Game {
                     }
                 }
                 
-                // Allow Player to push/damage back
-                if (this.player.isMoving) { // Check moving flag generically
+                if (this.player.isMoving) { 
                     let dmg = 0;
                     const meleeId = this.player.activeMelee;
                     if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
@@ -925,7 +946,6 @@ export default class Game {
             }
         });
 
-        // Sheep Logic (Unchanged)
         if (this.animals.length < 10 && Math.random() < 0.005) {
             const ang = Math.random() * 6.28;
             const dist = 600;
@@ -976,17 +996,54 @@ export default class Game {
         });
 
         this.projectiles.forEach(p => {
-            p.update();
-            if (p.owner === 'player' || p.owner === 'enemy') { 
-                const potentialTargets = [...this.npcs, ...this.animals, ...this.boats];
-                potentialTargets.forEach(n => {
-                    if (p.active && Utils.distance(p, n) < 16) {
+            const status = p.update();
+            
+            const targets = [this.player, ...this.npcs, ...this.animals, ...this.boats];
+            let hit = false;
+
+            if (p.active) {
+                targets.forEach(n => {
+                    if (!p.active) return;
+                    
+                    if (p.owner === 'player' && n === this.player) return;
+                    if (p.owner === 'enemy' && n.owner === 'enemy') return; 
+                    
+                    // Allow shooting own boats IF EMPTY (not occupied by self)
+                    if (n === this.player && this.player.inBoat) return;
+                    if (p.owner === 'player' && n.type === 'boat') {
+                        if (this.player.inBoat && n.x === this.player.x && n.y === this.player.y) return;
+                    }
+
+                    let hitDist = 16;
+                    if (n.type === 'boat') hitDist = 32;
+
+                    if (Utils.distance(p, n) < hitDist) {
                         p.active = false;
+                        hit = true;
+                        
                         n.hp -= p.damage;
-                        this.spawnParticles(n.x, n.y, '#f00', 6);
-                        this.spawnText(n.x, n.y, Math.floor(p.damage), "#fff");
+                        
+                        if (n.type === 'boat') {
+                            this.spawnParticles(p.x, p.y, '#ff0000', 5); 
+                            this.spawnParticles(p.x, p.y, '#ffa500', 5);
+                            this.spawnText(n.x, n.y - 20, Math.floor(p.damage), "#ff4444");
+                        } else {
+                            this.spawnParticles(n.x, n.y, '#f00', 6);
+                            this.spawnText(n.x, n.y, Math.floor(p.damage), "#fff");
+                        }
                     }
                 });
+            }
+
+            if ((!hit && !p.active && status === 'expired') && p.type === 'cannonball') {
+                const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
+                const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
+                const tile = this.world.getTile(gx, gy);
+                if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
+                    this.spawnParticles(p.x, p.y, '#3498db', 6); 
+                } else {
+                    this.spawnParticles(p.x, p.y, '#555', 4);
+                }
             }
         });
 
@@ -1023,6 +1080,11 @@ export default class Game {
                  this.loot.push({x: b.x, y: b.y, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
                  this.loot.push({x: b.x, y: b.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
                  this.spawnParticles(b.x, b.y, '#8B4513', 10);
+                 
+                 if (this.player.inBoat && b.x === this.player.x && b.y === this.player.y) {
+                     this.player.inBoat = false;
+                 }
+                 
                  return false;
              }
              return true;
@@ -1273,35 +1335,14 @@ export default class Game {
 
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
-                    // --- RENDER BOAT (Unoccupied) ---
                     if (obj._type === 'boat') {
-                        this.ctx.fillStyle = '#8B4513';
-                        // [NEW] Larger Boat Rendering (2x Scaled)
-                        const w = 48; const h = 24; // Doubled
-                        this.ctx.fillRect(obj.x - w/2, obj.y - h/2, w, h);
-                        
-                        this.ctx.fillStyle = '#5C3317';
-                        this.ctx.fillRect(obj.x - w/3, obj.y - h/3, w*0.6, h*0.6); 
-                        
-                        // Mast
-                        this.ctx.fillStyle = '#333';
-                        this.ctx.fillRect(obj.x - 2, obj.y - 32, 4, 32);
-                        
-                        // Sail
-                        this.ctx.fillStyle = obj._orig.owner === 'enemy' ? '#000' : '#fff'; 
-                        this.ctx.beginPath();
-                        this.ctx.moveTo(obj.x, obj.y - 32);
-                        this.ctx.lineTo(obj.x + 24, obj.y - 16);
-                        this.ctx.lineTo(obj.x, obj.y - 4);
-                        this.ctx.fill();
-                        
-                        this.drawHealth(obj._orig); // Show Boat Health
+                        // UNIFIED BOAT RENDER (EMPTY)
+                        this.drawBoat(this.ctx, obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp);
                     } else if (obj._type === 'loot') {
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else if (obj._type === 'sheep') {
-                        // [Existing Sheep Render logic]
                         const isMoving = obj._orig.moveTimer > 0;
                         const tick = isMoving ? (Date.now() * 0.015) : (Date.now() * 0.005);
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 2 : 0;
@@ -1333,45 +1374,19 @@ export default class Game {
                         const inBoat = isPlayer && obj._orig.inBoat; 
 
                         if (inBoat) {
-                            // [NEW] Rotate Context for Boat
+                            // UNIFIED BOAT RENDER (OCCUPIED)
+                            // Draw the boat first
+                            this.drawBoat(this.ctx, obj.x, obj.y, obj._orig.boatStats.heading, isPlayer ? 'player' : 'enemy', obj._orig.hp, obj._orig.maxHp);
+                            
+                            // Draw Player/NPC Head on top
                             this.ctx.save();
                             this.ctx.translate(obj.x, obj.y);
                             this.ctx.rotate(obj._orig.boatStats.heading);
-                            this.ctx.translate(-obj.x, -obj.y);
-
-                            // [NEW] Larger Boat for Player (2x Scaled)
-                            const w = 48; const h = 24; 
+                            this.ctx.fillStyle = isPlayer ? '#3498db' : '#993333';
+                            this.ctx.fillRect(-4, -4, 8, 8); // Head centered
+                            this.ctx.restore();
                             
-                            this.ctx.fillStyle = '#8B4513';
-                            this.ctx.fillRect(obj.x - w/2, obj.y - h/2, w, h);
-                            
-                            // Cannons (Visual)
-                            this.ctx.fillStyle = '#000';
-                            this.ctx.fillRect(obj.x - 10, obj.y - h/2 - 2, 4, 4);
-                            this.ctx.fillRect(obj.x + 6, obj.y - h/2 - 2, 4, 4);
-                            this.ctx.fillRect(obj.x - 10, obj.y + h/2 - 2, 4, 4);
-                            this.ctx.fillRect(obj.x + 6, obj.y + h/2 - 2, 4, 4);
-
-                            // Sail
-                            this.ctx.fillStyle = '#fff'; 
-                            this.ctx.beginPath();
-                            this.ctx.moveTo(obj.x + 8, obj.y - 32);
-                            this.ctx.lineTo(obj.x + 32, obj.y); // Pointing back/side
-                            this.ctx.lineTo(obj.x + 8, obj.y + 8);
-                            this.ctx.fill();
-
-                            // Mast
-                            this.ctx.fillStyle = '#333';
-                            this.ctx.fillRect(obj.x + 4, obj.y - 8, 8, 8); 
-
-                            // Player Head (Visual reference for center)
-                            this.ctx.fillStyle = '#3498db';
-                            this.ctx.fillRect(obj.x - 4, obj.y - 4, 8, 8);
-
-                            this.ctx.restore(); // Undo rotation
-                            
-                            this.drawHealth(obj._orig);
-                            return; // Skip standard player render
+                            return; 
                         }
 
                         const colorShirt = isPlayer ? '#3498db' : '#993333';
@@ -1493,11 +1508,9 @@ export default class Game {
         
         this.ctx.restore(); // Undo Camera
 
-        // Draw Wind Particles in Screen Space (After restore)
         this.windParticles.forEach(p => p.draw(this.ctx, this.world.wind.angle));
 
         this.ctx.font = "bold 14px monospace";
-        // Re-apply camera just for texts (as they were in world space)
         this.ctx.save();
         this.ctx.scale(this.zoom, this.zoom);
         this.ctx.translate(-this.camera.x, -this.camera.y);
@@ -1505,7 +1518,7 @@ export default class Game {
             this.ctx.fillStyle = t.col;
             this.ctx.fillText(t.txt, t.x, t.y);
         });
-        this.ctx.restore();w
+        this.ctx.restore();
     }
 
     loop(timestamp) {
