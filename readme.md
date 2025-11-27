@@ -18,3 +18,4 @@ MEDIVALPIXELS/
 - speed should build up slowly. Not instant. 
 - one should not be able to shoot at own boat when onboard the boat.
 - allow building boats only on water
+- towers should hit boats too

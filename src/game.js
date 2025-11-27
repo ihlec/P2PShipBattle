@@ -8,6 +8,11 @@ export default class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
+        
+        // Shadow Canvas for Lighting (Offscreen) to fix grey clouds issue
+        this.shadowCanvas = document.createElement('canvas');
+        this.shadowCtx = this.shadowCanvas.getContext('2d');
+
         this.resize();
         window.addEventListener('resize', () => this.resize());
 
@@ -162,6 +167,11 @@ export default class Game {
     resize() { 
         this.canvas.width = window.innerWidth; 
         this.canvas.height = window.innerHeight; 
+        
+        // Resize Shadow Canvas to match
+        this.shadowCanvas.width = this.canvas.width;
+        this.shadowCanvas.height = this.canvas.height;
+
         this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
     }
 
@@ -357,6 +367,11 @@ export default class Game {
         } else {
             this.dom.activeBp.style.display = 'none';
         }
+        
+        // Update Time UI
+        const t = this.world.time;
+        const hour = Math.floor(t * 24);
+        this.dom.biome.innerText += ` | ${hour}:00`;
     }
 
     findSafeSpawn() {
@@ -630,8 +645,7 @@ export default class Game {
                 return;
             }
 
-            // [NEW] REPAIR LOGIC
-            // Check if user is holding a material suitable for repair
+            // REPAIR LOGIC
             const selId = this.player.selectedTile;
             if (selId === TILES.WOOD.id || selId === TILES.GREY.id) {
                 // Check boats
@@ -657,14 +671,12 @@ export default class Game {
                         // Wood repairs fences, Stone repairs walls/towers
                         let canRepair = false;
                         if (selId === TILES.WOOD.id && (tileId === TILES.WOOD_WALL.id || tileId === TILES.WOOD_WALL_OPEN.id)) canRepair = true;
-                        if (selId === TILES.GREY.id && ([9, 12, 14, 15].includes(tileId))) canRepair = true; // Walls/Towers
+                        if (selId === TILES.GREY.id && ([9, 12, 14, 15].includes(tileId))) canRepair = true; 
                         
                         if (canRepair) {
                             if (this.player.inventory[selId] >= CONFIG.REPAIR.COST || this.godMode) {
                                 if(!this.godMode) this.player.inventory[selId] -= CONFIG.REPAIR.COST;
-                                // "Healing" a tile means reducing its damage value
                                 this.world.hitTile(tx, ty, -CONFIG.REPAIR.AMOUNT);
-                                // Ensure damage doesn't go below 0 (managed in world? No, need to check)
                                 if (this.world.tileData[`${tx},${ty}`].dmg < 0) this.world.tileData[`${tx},${ty}`].dmg = 0;
                                 
                                 this.spawnParticles(tx*CONFIG.TILE_SIZE+16, ty*CONFIG.TILE_SIZE+16, '#0f0', 5);
@@ -685,7 +697,7 @@ export default class Game {
                 let tileId = this.world.getTile(gx, gy);
                 const tileDef = ID_TO_TILE[tileId];
 
-                if (!tileDef.solid && tileId !== TILES.TREE.id && tileId !== TILES.WOOD_WALL_OPEN.id) {
+                if (!tileDef.solid && tileId !== TILES.TREE.id && tileId !== TILES.WOOD_WALL_OPEN.id && tileId !== TILES.TORCH.id) {
                     let below = this.world.getTile(gx, gy + 1);
                     if ([12,14,15].includes(below)) { tileId = below; } 
                     else {
@@ -705,6 +717,7 @@ export default class Game {
                 }
 
                 const targetDef = ID_TO_TILE[tileId];
+                // Handle Damage/Destruction (Works for Walls, Rocks, AND now TORCHES)
                 if (targetDef.hp) {
                     const damageDealt = 20; 
                     const totalDmg = this.world.hitTile(tx, ty, damageDealt);
@@ -726,6 +739,8 @@ export default class Game {
                              this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
                         } else if (tileId === TILES.WALL.id) {
                              this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 1, bob: Math.random()*100});
+                        } else if (tileId === TILES.TORCH.id) {
+                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
                         }
                         
                         this.recalcCannons();
@@ -796,6 +811,72 @@ export default class Game {
         for(let i=0; i<count; i++) {
             this.particles.push(new Particle(x, y, color, (Math.random()-0.5)*5, (Math.random()-0.5)*5, 30 + Math.random()*20));
         }
+    }
+
+        // Draw Lighting
+    renderLighting() {
+        const ambient = this.world.getAmbientLight();
+        if (ambient <= 0.05) return;
+
+        this.shadowCtx.clearRect(0, 0, this.shadowCanvas.width, this.shadowCanvas.height);
+        
+        this.shadowCtx.globalCompositeOperation = 'source-over';
+        this.shadowCtx.fillStyle = `rgba(0, 0, 0, ${ambient})`;
+        this.shadowCtx.fillRect(0, 0, this.shadowCanvas.width, this.shadowCanvas.height);
+        
+        this.shadowCtx.globalCompositeOperation = 'destination-out';
+        
+        const toScreen = (wx, wy) => {
+            return {
+                x: (wx - this.camera.x) * this.zoom,
+                y: (wy - this.camera.y) * this.zoom
+            };
+        };
+
+        const drawLight = (wx, wy, radius, intensity = 1.0) => {
+            const pos = toScreen(wx, wy);
+            if (pos.x < -radius || pos.y < -radius || pos.x > this.canvas.width + radius || pos.y > this.canvas.height + radius) return;
+
+            const grad = this.shadowCtx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, radius * this.zoom);
+            grad.addColorStop(0, "rgba(255, 255, 255, 1)"); 
+            grad.addColorStop(0.5, "rgba(255, 255, 255, 0.8)"); 
+            grad.addColorStop(1, "rgba(255, 255, 255, 0)"); 
+            
+            this.shadowCtx.fillStyle = grad;
+            this.shadowCtx.beginPath();
+            this.shadowCtx.arc(pos.x, pos.y, radius * this.zoom, 0, Math.PI * 2);
+            this.shadowCtx.fill();
+        };
+
+        // Player
+        drawLight(this.player.x, this.player.y, 150);
+
+        // Ships
+        this.boats.forEach(b => drawLight(b.x, b.y, 120));
+
+        // Projectiles
+        this.projectiles.forEach(p => {
+            if (p.type === 'cannonball') drawLight(p.x, p.y, 40);
+        });
+
+        // Static Tiles (Torches/Towers)
+        const startCol = Math.floor(this.camera.x / CONFIG.TILE_SIZE);
+        const endCol = startCol + (this.canvas.width / this.zoom / CONFIG.TILE_SIZE) + 1;
+        const startRow = Math.floor(this.camera.y / CONFIG.TILE_SIZE);
+        const endRow = startRow + (this.canvas.height / this.zoom / CONFIG.TILE_SIZE) + 1;
+
+        for (let r = startRow; r <= endRow; r++) {
+            for (let c = startCol; c <= endCol; c++) {
+                const id = this.world.getTile(c, r);
+                if (id === TILES.TORCH.id) drawLight(c * CONFIG.TILE_SIZE + 16, r * CONFIG.TILE_SIZE + 16, 200);
+                if ([12, 14, 15].includes(id)) drawLight(c * CONFIG.TILE_SIZE + 16, r * CONFIG.TILE_SIZE + 16, 150);
+            }
+        }
+
+        this.ctx.save();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0); 
+        this.ctx.drawImage(this.shadowCanvas, 0, 0);
+        this.ctx.restore();
     }
 
     drawBoat(ctx, x, y, heading, owner, hp, maxHp) {
@@ -1057,7 +1138,7 @@ export default class Game {
                     
                     if (p.owner === 'player' && n === this.player) return;
                     if (p.owner === 'enemy' && n.owner === 'enemy') return; 
-                    
+
                     // Allow shooting own boats IF EMPTY (not occupied by self)
                     if (n === this.player && this.player.inBoat) return;
                     if (p.owner === 'player' && n.type === 'boat') {
@@ -1211,7 +1292,7 @@ export default class Game {
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
 
-                if ((!tile.solid || id === TILES.WATER.id || id === TILES.DEEP_WATER.id) && id !== TILES.TREE.id && id !== TILES.WOOD_WALL_OPEN.id) {
+                if ((!tile.solid || id === TILES.WATER.id || id === TILES.DEEP_WATER.id) && id !== TILES.TREE.id && id !== TILES.WOOD_WALL_OPEN.id && id !== TILES.TORCH.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
                     this.ctx.fillStyle = tile.color;
@@ -1228,7 +1309,7 @@ export default class Game {
                     this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 6, ty, 6, CONFIG.TILE_SIZE);
                 }
                 
-                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id) {
+                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id || id === TILES.TORCH.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
                      this.ctx.fillStyle = TILES.GRASS.color; 
@@ -1345,6 +1426,14 @@ export default class Game {
                     this.ctx.globalAlpha = 1.0;
                 }
 
+                if (id === TILES.TORCH.id) {
+                    this.ctx.fillStyle = '#555';
+                    this.ctx.fillRect(tx + 14, ty + 10, 4, 12); 
+                    this.ctx.fillStyle = '#ffaa00';
+                    const flicker = Math.random() * 2;
+                    this.ctx.fillRect(tx + 12 - flicker, ty + 6 - flicker, 8 + flicker*2, 8 + flicker*2); 
+                }
+
                 if ([12, 14, 15].includes(id)) {
                     let isOccluding = false;
                     for (let checkR = r - 2; checkR < r; checkR++) {
@@ -1386,7 +1475,6 @@ export default class Game {
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'boat') {
-                        // UNIFIED BOAT RENDER (EMPTY)
                         this.drawBoat(this.ctx, obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp);
                     } else if (obj._type === 'loot') {
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
@@ -1419,23 +1507,17 @@ export default class Game {
                         
                         this.drawHealth(obj._orig);
                     } else {
-                        // PLAYER/NPC
                         const isPlayer = obj._type === 'player';
                         const inBoat = isPlayer && obj._orig.inBoat; 
 
                         if (inBoat) {
-                            // UNIFIED BOAT RENDER (OCCUPIED)
-                            // Draw the boat first
                             this.drawBoat(this.ctx, obj.x, obj.y, obj._orig.boatStats.heading, isPlayer ? 'player' : 'enemy', obj._orig.hp, obj._orig.maxHp);
-                            
-                            // Draw Player/NPC Head on top
                             this.ctx.save();
                             this.ctx.translate(obj.x, obj.y);
                             this.ctx.rotate(obj._orig.boatStats.heading);
                             this.ctx.fillStyle = isPlayer ? '#3498db' : '#993333';
-                            this.ctx.fillRect(-4, -4, 8, 8); // Head centered
+                            this.ctx.fillRect(-4, -4, 8, 8); 
                             this.ctx.restore();
-                            
                             return; 
                         }
 
@@ -1466,15 +1548,12 @@ export default class Game {
                         this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
                         this.ctx.fill();
 
-                        // FEET
                         this.ctx.fillStyle = colorBoots;
                         this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
                         this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
 
-                        // If in boat, shift body up slightly
                         const torsoY = obj.y - 8 - bounceY;
 
-                        // LEGS
                         this.ctx.fillStyle = colorPants;
                         this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY, BODY_W, 6); 
 
@@ -1493,20 +1572,15 @@ export default class Game {
                         this.ctx.fillStyle = colorHelmet;
                         this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6); 
 
-                        // Draw Weapon in Hand ONLY IF SWORD
                         const heldId = this.player.activeMelee;
                         if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id)) {
-                            // Simple rendering of a sword
-                            this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317'; // Iron vs Wood Color
+                            this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317'; 
                             this.ctx.lineWidth = 3;
-                            
-                            // Position relative to hand
                             const handX = obj.x + 10; 
                             const handY = torsoY + 6 + arm2Offset;
-                            
                             this.ctx.beginPath();
                             this.ctx.moveTo(handX, handY);
-                            this.ctx.lineTo(handX + 10, handY - 10); // Pointing up/out
+                            this.ctx.lineTo(handX + 10, handY - 10); 
                             this.ctx.stroke();
                         }
 
@@ -1531,7 +1605,7 @@ export default class Game {
 
         this.ctx.fillStyle = '#fff';
         this.projectiles.forEach(p => {
-            if(p.draw) p.draw(this.ctx, 0, 0); // Use projectile's draw method
+            if(p.draw) p.draw(this.ctx, 0, 0); 
         });
 
         this.particles.forEach(p => p.draw(this.ctx, 0, 0)); 
@@ -1556,7 +1630,9 @@ export default class Game {
             this.ctx.stroke();
         }
         
-        this.ctx.restore(); // Undo Camera
+        this.ctx.restore(); 
+
+        this.renderLighting();
 
         this.windParticles.forEach(p => p.draw(this.ctx, this.world.wind.angle));
 

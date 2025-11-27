@@ -11,17 +11,22 @@ export const CONFIG = {
     MAX_NPCS: 30,
     WOOL_REGROW_TIME: 36000,
     
-    // [NEW] Repair Settings
-    REPAIR: {
-        AMOUNT: 20, // HP restored per click
-        COST: 1     // Resource cost per click
+    DAY_CYCLE: {
+        DURATION: 24000, 
+        NIGHT_OPACITY: 0.95, // Darker night
+        SUNRISE: 0.25,
+        SUNSET: 0.75
     },
 
-    // Age of Sail Physics
+    REPAIR: {
+        AMOUNT: 20, 
+        COST: 1     
+    },
+
     BOAT: {
-        ACCELERATION: 0.05,
+        ACCELERATION: 0.003,
         DECELERATION: 0.02,
-        MAX_SPEED: 4.5,
+        MAX_SPEED: 3.5,
         RUDDER_SPEED: 0.03, 
         MAX_RUDDER: 0.04,   
         TURN_FACTOR: 0.8,
@@ -36,7 +41,6 @@ export const CONFIG = {
         ENEMY_ENGAGE_RANGE: 250  
     },
 
-    // Visual Wind Settings
     WIND: {
         PARTICLE_COUNT: 150,
         COLOR: 'rgba(255, 255, 255, 0.08)', 
@@ -73,6 +77,9 @@ export const TILES = {
     
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' },
     BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' },
+    
+    // [MODIFIED] Added HP for destruction
+    TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10 },
 
     // WEAPONS AS ITEMS
     SPEAR_WOOD: { id: 30, color: '#5C3317', solid: false, name: 'Wd.Spear', short: 'W.Spr' },
@@ -91,7 +98,8 @@ export const BLUEPRINTS = [
     { name: "Fence/Gate", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
     { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
     { name: "Road Segment", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1 } },
-    { name: "Boat", structure: [{x:0, y:0, id: TILES.BOAT.id}], cost: { [TILES.WOOD.id]: 5, [TILES.WOOL.id]: 2 }, special: 'boat' } 
+    { name: "Boat", structure: [{x:0, y:0, id: TILES.BOAT.id}], cost: { [TILES.WOOD.id]: 5, [TILES.WOOL.id]: 2 }, special: 'boat' },
+    { name: "Torch", structure: [{x:0, y:0, id: TILES.TORCH.id}], cost: { [TILES.WOOD.id]: 1, [TILES.BLACK.id]: 1 } }
 ];
 
 export const WEAPONS = {
