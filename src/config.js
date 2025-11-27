@@ -11,6 +11,12 @@ export const CONFIG = {
     MAX_NPCS: 30,
     WOOL_REGROW_TIME: 36000,
     
+    // [NEW] Repair Settings
+    REPAIR: {
+        AMOUNT: 20, // HP restored per click
+        COST: 1     // Resource cost per click
+    },
+
     // Age of Sail Physics
     BOAT: {
         ACCELERATION: 0.05,
@@ -20,15 +26,14 @@ export const CONFIG = {
         MAX_RUDDER: 0.04,   
         TURN_FACTOR: 0.8,
         
-        BROADSIDE_COOLDOWN: 120, // Player Cooldown
+        BROADSIDE_COOLDOWN: 120, 
         CANNON_SPEED: 12,
         CANNON_DAMAGE: 50,
-        CANNON_RANGE: 30,
+        CANNON_RANGE: 60,
 
-        // [NEW] Enemy Stats
-        ENEMY_COOLDOWN: 180,     // Slower than player
+        ENEMY_COOLDOWN: 180,     
         ENEMY_DETECT_RANGE: 500,
-        ENEMY_ENGAGE_RANGE: 250  // Distance they try to maintain
+        ENEMY_ENGAGE_RANGE: 250  
     },
 
     // Visual Wind Settings

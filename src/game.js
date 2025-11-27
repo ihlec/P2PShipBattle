@@ -630,6 +630,53 @@ export default class Game {
                 return;
             }
 
+            // [NEW] REPAIR LOGIC
+            // Check if user is holding a material suitable for repair
+            const selId = this.player.selectedTile;
+            if (selId === TILES.WOOD.id || selId === TILES.GREY.id) {
+                // Check boats
+                const boatToRepair = this.boats.find(b => Utils.distance(b, {x:mx, y:my}) < 32);
+                if (boatToRepair && boatToRepair.hp < boatToRepair.maxHp && selId === TILES.WOOD.id) {
+                    if (this.player.inventory[TILES.WOOD.id] >= CONFIG.REPAIR.COST || this.godMode) {
+                        if(!this.godMode) this.player.inventory[TILES.WOOD.id] -= CONFIG.REPAIR.COST;
+                        boatToRepair.hp = Math.min(boatToRepair.hp + CONFIG.REPAIR.AMOUNT, boatToRepair.maxHp);
+                        this.spawnParticles(boatToRepair.x, boatToRepair.y, '#0f0', 5);
+                        this.spawnText(boatToRepair.x, boatToRepair.y, "+HP", "#0f0");
+                        this.updateUI();
+                        return;
+                    }
+                }
+                
+                // Check structures
+                const tx = gx; const ty = gy;
+                const tileId = this.world.getTile(tx, ty);
+                const tileDef = ID_TO_TILE[tileId];
+                if (tileDef.hp) {
+                    const dmg = this.world.getTileDamage(tx, ty);
+                    if (dmg > 0) {
+                        // Wood repairs fences, Stone repairs walls/towers
+                        let canRepair = false;
+                        if (selId === TILES.WOOD.id && (tileId === TILES.WOOD_WALL.id || tileId === TILES.WOOD_WALL_OPEN.id)) canRepair = true;
+                        if (selId === TILES.GREY.id && ([9, 12, 14, 15].includes(tileId))) canRepair = true; // Walls/Towers
+                        
+                        if (canRepair) {
+                            if (this.player.inventory[selId] >= CONFIG.REPAIR.COST || this.godMode) {
+                                if(!this.godMode) this.player.inventory[selId] -= CONFIG.REPAIR.COST;
+                                // "Healing" a tile means reducing its damage value
+                                this.world.hitTile(tx, ty, -CONFIG.REPAIR.AMOUNT);
+                                // Ensure damage doesn't go below 0 (managed in world? No, need to check)
+                                if (this.world.tileData[`${tx},${ty}`].dmg < 0) this.world.tileData[`${tx},${ty}`].dmg = 0;
+                                
+                                this.spawnParticles(tx*CONFIG.TILE_SIZE+16, ty*CONFIG.TILE_SIZE+16, '#0f0', 5);
+                                this.spawnText(tx*CONFIG.TILE_SIZE+16, ty*CONFIG.TILE_SIZE, "+HP", "#0f0");
+                                this.updateUI();
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
             if (this.activeBlueprint) {
                 this.activeBlueprint = null;
                 this.updateUI();
@@ -985,7 +1032,10 @@ export default class Game {
         this.cannons.forEach(c => {
             if (c.cooldown > 0) c.cooldown--;
             else if (c.ammo > 0) {
-                let target = this.npcs.find(n => Utils.distance(c, n) < c.range);
+                // [NEW] Tower Target Logic: NPCs + Enemy Boats
+                const validTargets = [...this.npcs, ...this.boats.filter(b => b.owner === 'enemy')];
+                let target = validTargets.find(n => Utils.distance(c, n) < c.range);
+                
                 if (target) {
                     this.projectiles.push(new Projectile(c.x, c.y - CONFIG.TILE_SIZE, target.x, target.y, c.damage, 12, '#fff', false));
                     c.cooldown = 60;
