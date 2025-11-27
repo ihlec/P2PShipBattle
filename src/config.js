@@ -18,15 +18,20 @@ export const CONFIG = {
         MAX_SPEED: 4.5,
         RUDDER_SPEED: 0.03, 
         MAX_RUDDER: 0.04,   
-        TURN_FACTOR: 0.8    
+        TURN_FACTOR: 0.8,
+        // [NEW] Combat Stats
+        BROADSIDE_COOLDOWN: 120, // Frames (2 seconds)
+        CANNON_SPEED: 12,
+        CANNON_DAMAGE: 50,
+        CANNON_RANGE: 60
     },
 
     // Visual Wind Settings
     WIND: {
         PARTICLE_COUNT: 150,
         COLOR: 'rgba(255, 255, 255, 0.08)', 
-        SPEED_BASE: 1,      // Reduced from 2
-        SPEED_VARIATION: 1.5 // Reduced from 3
+        SPEED_BASE: 1,      
+        SPEED_VARIATION: 1.5 
     }
 };
 

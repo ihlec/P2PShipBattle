@@ -16,13 +16,12 @@ export class Particle {
     }
 }
 
-// [NEW] Wind Particle for Screen Space
 export class WindParticle {
     constructor(screenWidth, screenHeight) {
         this.x = Math.random() * screenWidth;
         this.y = Math.random() * screenHeight;
         this.speed = CONFIG.WIND.SPEED_BASE + Math.random() * CONFIG.WIND.SPEED_VARIATION;
-        this.length = 5 + Math.random() * 15; // Trail length
+        this.length = 5 + Math.random() * 15; 
         this.thickness = Math.random() > 0.5 ? 1 : 2;
     }
 
@@ -33,7 +32,6 @@ export class WindParticle {
         this.x += dx;
         this.y += dy;
 
-        // Screen Wrapping (Toroidal)
         if (this.x < -20) this.x = screenWidth + 20;
         if (this.x > screenWidth + 20) this.x = -20;
         if (this.y < -20) this.y = screenHeight + 20;
@@ -75,6 +73,11 @@ export class Projectile {
             ctx.fillStyle = '#fff'; 
             ctx.fillRect(10, -2, 4, 4); 
             ctx.restore();
+        } else if (this.type === 'cannonball') {
+            ctx.fillStyle = '#111';
+            ctx.beginPath();
+            ctx.arc(this.x - camX, this.y - camY, 5, 0, Math.PI * 2);
+            ctx.fill();
         } else {
             ctx.fillStyle = this.color;
             ctx.beginPath();
@@ -106,35 +109,88 @@ export class Entity {
 
         // Boat Physics State
         this.boatStats = {
-            heading: 0,       // Direction facing (radians)
-            speed: 0,         // Current forward velocity
-            rudder: 0,        // Current rudder angle (visual & physics)
-            sailLevel: 0      // 0 = stopped, 1 = full sails (target speed)
+            heading: 0,       
+            speed: 0,         
+            rudder: 0,        
+            sailLevel: 0,
+            
+            // [NEW] Combat State
+            cooldownLeft: 0,
+            cooldownRight: 0
         };
 
-        // AI State for NPCs (Chase -> Charge -> Rest)
+        // AI State for NPCs
         this.aiState = { 
-            mode: 'chase', // 'chase', 'charge', 'rest'
+            mode: 'chase', 
             tx: 0, 
             ty: 0, 
             timer: 0 
         };
     }
     
+    // [NEW] Fire Broadside Cannons
+    shootBroadside(game, side) { // side: 'left' or 'right'
+        const stats = this.boatStats;
+        if (side === 'left' && stats.cooldownLeft > 0) return;
+        if (side === 'right' && stats.cooldownRight > 0) return;
+
+        // Determine Angle (Perpendicular to Heading)
+        let fireAngle = stats.heading + (side === 'right' ? Math.PI/2 : -Math.PI/2);
+        
+        // Fire Salvo of 3
+        const offsets = [-10, 0, 10]; // Offset along the ship length
+        offsets.forEach(off => {
+            // Calculate spawn position based on offset along ship hull
+            const spawnX = this.x + Math.cos(stats.heading) * off;
+            const spawnY = this.y + Math.sin(stats.heading) * off;
+
+            // Target is simply far away in the fire direction
+            const tx = spawnX + Math.cos(fireAngle) * 100;
+            const ty = spawnY + Math.sin(fireAngle) * 100;
+
+            const proj = new Projectile(
+                spawnX, spawnY, tx, ty, 
+                CONFIG.BOAT.CANNON_DAMAGE, 
+                CONFIG.BOAT.CANNON_SPEED, 
+                '#000', true, 'cannonball'
+            );
+            proj.life = CONFIG.BOAT.CANNON_RANGE;
+            
+            // Add slight spread to individual shots
+            proj.angle += (Math.random() - 0.5) * 0.1;
+            proj.dx = Math.cos(proj.angle) * CONFIG.BOAT.CANNON_SPEED;
+            proj.dy = Math.sin(proj.angle) * CONFIG.BOAT.CANNON_SPEED;
+
+            game.projectiles.push(proj);
+            
+            // Spawn Smoke
+            game.spawnParticles(spawnX + Math.cos(fireAngle)*10, spawnY + Math.sin(fireAngle)*10, '#ddd', 5);
+        });
+
+        // Set Cooldown
+        if (side === 'left') stats.cooldownLeft = CONFIG.BOAT.BROADSIDE_COOLDOWN;
+        if (side === 'right') stats.cooldownRight = CONFIG.BOAT.BROADSIDE_COOLDOWN;
+        
+        // Spawn Text
+        game.spawnText(this.x, this.y - 20, "FIRE!", "#fff");
+    }
+
     updateBoatMovement(input, dt, world) {
         const stats = this.boatStats;
         const cfg = CONFIG.BOAT;
         const wind = world.wind;
 
-        // 1. Handle Input (Sails and Rudder)
+        // Cooldown Tick
+        if (stats.cooldownLeft > 0) stats.cooldownLeft--;
+        if (stats.cooldownRight > 0) stats.cooldownRight--;
+
         if (input.up) stats.sailLevel = 1; 
-        else if (input.down) stats.sailLevel = -0.5; // Braking/Reversing
-        else stats.sailLevel = 0; // Drifting
+        else if (input.down) stats.sailLevel = -0.5; 
+        else stats.sailLevel = 0; 
 
         if (input.left) stats.rudder -= cfg.RUDDER_SPEED;
         if (input.right) stats.rudder += cfg.RUDDER_SPEED;
 
-        // Clamp Rudder
         if (stats.rudder > cfg.MAX_RUDDER) stats.rudder = cfg.MAX_RUDDER;
         if (stats.rudder < -cfg.MAX_RUDDER) stats.rudder = -cfg.MAX_RUDDER;
         
@@ -142,7 +198,6 @@ export class Entity {
             stats.rudder *= 0.9;
         }
 
-        // Wind Physics Efficiency
         let windEfficiency = 1.0;
         if (stats.sailLevel > 0) {
             const angleDiff = stats.heading - wind.angle;
@@ -151,16 +206,13 @@ export class Entity {
             windEfficiency = 0.2 + (normalized * 1.0);
         }
 
-        // 2. Physics: Acceleration
         let targetSpeed = stats.sailLevel * cfg.MAX_SPEED * windEfficiency;
         
         if (stats.speed < targetSpeed) stats.speed += cfg.ACCELERATION;
         else if (stats.speed > targetSpeed) stats.speed -= cfg.DECELERATION;
 
-        // Apply Drag
         if (stats.sailLevel === 0) stats.speed *= 0.98;
 
-        // 3. Physics: Turning
         const velocityRatio = Math.abs(stats.speed) / cfg.MAX_SPEED;
         const turnAmount = stats.rudder * (0.2 + (velocityRatio * cfg.TURN_FACTOR));
         
@@ -168,11 +220,9 @@ export class Entity {
              stats.heading += turnAmount;
         }
 
-        // 4. Calculate Vector
         const dx = Math.cos(stats.heading) * stats.speed;
         const dy = Math.sin(stats.heading) * stats.speed;
 
-        // 5. Move
         this.move(dx, dy, world);
         
         this.isMoving = Math.abs(stats.speed) > 0.1;

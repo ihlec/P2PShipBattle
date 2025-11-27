@@ -8,7 +8,6 @@ export default class InputHandler {
         window.addEventListener('keydown', e => {
             this.keys[e.key.toLowerCase()] = true;
             if(e.key.toLowerCase() === 'escape') document.getElementById('blueprint-menu').style.display = 'none';
-            // We need to access toggleBlueprints here, which is now a method on Game
             if(e.key.toLowerCase() === 'b') this.game.toggleBlueprints();
         });
         window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);

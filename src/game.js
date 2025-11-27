@@ -46,7 +46,6 @@ export default class Game {
         this.texts = [];
         this.cannons = []; 
         
-        // [NEW] Wind Particles
         this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
 
         this.camera = { x: 0, y: 0 };
@@ -163,7 +162,6 @@ export default class Game {
     resize() { 
         this.canvas.width = window.innerWidth; 
         this.canvas.height = window.innerHeight; 
-        // Re-init wind particles on resize to fill screen
         this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
     }
 
@@ -761,7 +759,7 @@ export default class Game {
         // Update global wind
         this.world.update(dt);
         
-        // [NEW] Update Wind Particles (Screen Space)
+        // Update Wind Particles (Screen Space)
         this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle));
 
         if (this.shootCooldown > 0) this.shootCooldown--;
@@ -782,6 +780,10 @@ export default class Game {
         };
 
         if (this.player.inBoat) {
+            // [NEW] Check for Broadside Fire
+            if (this.input.keys['q']) this.player.shootBroadside(this, 'left');
+            if (this.input.keys['e']) this.player.shootBroadside(this, 'right');
+            
             this.player.updateBoatMovement(inputState, dt, this.world);
             this.player.moveTime += dt;
         } else {
@@ -1274,20 +1276,22 @@ export default class Game {
                     // --- RENDER BOAT (Unoccupied) ---
                     if (obj._type === 'boat') {
                         this.ctx.fillStyle = '#8B4513';
-                        // Boat shape
-                        this.ctx.fillRect(obj.x - 12, obj.y - 6, 24, 12);
-                        this.ctx.fillStyle = '#5C3317';
-                        this.ctx.fillRect(obj.x - 8, obj.y - 4, 16, 8); // Inner part
+                        // [NEW] Larger Boat Rendering (2x Scaled)
+                        const w = 48; const h = 24; // Doubled
+                        this.ctx.fillRect(obj.x - w/2, obj.y - h/2, w, h);
                         
-                        // Mast (simple)
+                        this.ctx.fillStyle = '#5C3317';
+                        this.ctx.fillRect(obj.x - w/3, obj.y - h/3, w*0.6, h*0.6); 
+                        
+                        // Mast
                         this.ctx.fillStyle = '#333';
-                        this.ctx.fillRect(obj.x - 2, obj.y - 16, 4, 16);
+                        this.ctx.fillRect(obj.x - 2, obj.y - 32, 4, 32);
                         
                         // Sail
-                        this.ctx.fillStyle = obj._orig.owner === 'enemy' ? '#000' : '#fff'; // Flag logic
+                        this.ctx.fillStyle = obj._orig.owner === 'enemy' ? '#000' : '#fff'; 
                         this.ctx.beginPath();
-                        this.ctx.moveTo(obj.x, obj.y - 16);
-                        this.ctx.lineTo(obj.x + 12, obj.y - 10);
+                        this.ctx.moveTo(obj.x, obj.y - 32);
+                        this.ctx.lineTo(obj.x + 24, obj.y - 16);
                         this.ctx.lineTo(obj.x, obj.y - 4);
                         this.ctx.fill();
                         
@@ -1335,22 +1339,30 @@ export default class Game {
                             this.ctx.rotate(obj._orig.boatStats.heading);
                             this.ctx.translate(-obj.x, -obj.y);
 
-                            this.ctx.fillStyle = '#8B4513';
-                            // Draw centered on 0,0 relative to translate
-                            // hull
-                            this.ctx.fillRect(obj.x - 12, obj.y - 6, 24, 12);
+                            // [NEW] Larger Boat for Player (2x Scaled)
+                            const w = 48; const h = 24; 
                             
+                            this.ctx.fillStyle = '#8B4513';
+                            this.ctx.fillRect(obj.x - w/2, obj.y - h/2, w, h);
+                            
+                            // Cannons (Visual)
+                            this.ctx.fillStyle = '#000';
+                            this.ctx.fillRect(obj.x - 10, obj.y - h/2 - 2, 4, 4);
+                            this.ctx.fillRect(obj.x + 6, obj.y - h/2 - 2, 4, 4);
+                            this.ctx.fillRect(obj.x - 10, obj.y + h/2 - 2, 4, 4);
+                            this.ctx.fillRect(obj.x + 6, obj.y + h/2 - 2, 4, 4);
+
                             // Sail
                             this.ctx.fillStyle = '#fff'; 
                             this.ctx.beginPath();
-                            this.ctx.moveTo(obj.x + 4, obj.y - 16);
-                            this.ctx.lineTo(obj.x + 16, obj.y); // Pointing back/side
-                            this.ctx.lineTo(obj.x + 4, obj.y + 4);
+                            this.ctx.moveTo(obj.x + 8, obj.y - 32);
+                            this.ctx.lineTo(obj.x + 32, obj.y); // Pointing back/side
+                            this.ctx.lineTo(obj.x + 8, obj.y + 8);
                             this.ctx.fill();
 
                             // Mast
                             this.ctx.fillStyle = '#333';
-                            this.ctx.fillRect(obj.x + 2, obj.y - 4, 4, 4); 
+                            this.ctx.fillRect(obj.x + 4, obj.y - 8, 8, 8); 
 
                             // Player Head (Visual reference for center)
                             this.ctx.fillStyle = '#3498db';
@@ -1481,12 +1493,11 @@ export default class Game {
         
         this.ctx.restore(); // Undo Camera
 
-        // [NEW] Draw Wind Particles in Screen Space (After restore)
+        // Draw Wind Particles in Screen Space (After restore)
         this.windParticles.forEach(p => p.draw(this.ctx, this.world.wind.angle));
 
         this.ctx.font = "bold 14px monospace";
-        // To draw texts in world space, we must re-apply camera or refactor text system.
-        // For simplicity, let's re-apply camera just for texts (as they were in world space)
+        // Re-apply camera just for texts (as they were in world space)
         this.ctx.save();
         this.ctx.scale(this.zoom, this.zoom);
         this.ctx.translate(-this.camera.x, -this.camera.y);
@@ -1494,7 +1505,7 @@ export default class Game {
             this.ctx.fillStyle = t.col;
             this.ctx.fillText(t.txt, t.x, t.y);
         });
-        this.ctx.restore();
+        this.ctx.restore();w
     }
 
     loop(timestamp) {
@@ -1504,4 +1515,4 @@ export default class Game {
         this.draw();
         requestAnimationFrame(t => this.loop(t));
     }
-}ds
+}
