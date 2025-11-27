@@ -2,7 +2,7 @@ import { CONFIG, TILES, ID_TO_TILE, BLUEPRINTS } from './config.js';
 import Utils from './utils.js';
 import InputHandler from './input.js';
 import World from './world.js';
-import { Entity, Particle, Projectile, Sheep } from './entities.js';
+import { Entity, Particle, Projectile, Sheep, Boat } from './entities.js';
 
 export default class Game {
     constructor() {
@@ -13,12 +13,11 @@ export default class Game {
 
         this.input = new InputHandler(this);
         
-        // --- MAP REGENERATION LOGIC ---
         let validSpawn = null;
         let attempts = 0;
         
         while (!validSpawn && attempts < 10) {
-            this.world = new World(); // Generates new seed
+            this.world = new World(); 
             validSpawn = this.findSafeSpawn();
             if (!validSpawn) {
                 console.log("Map rejected (Bad Spawn). Regenerating...");
@@ -27,11 +26,9 @@ export default class Game {
         }
         
         if (!validSpawn) {
-            // Fallback if 10 attempts fail (extremely rare)
             validSpawn = {x: 0, y: 0};
             console.warn("Could not find safe spawn after 10 attempts.");
         }
-        // ------------------------------
 
         this.player = new Entity(validSpawn.x, validSpawn.y, 'player');
         this.player.isMoving = false;
@@ -39,6 +36,7 @@ export default class Game {
 
         this.npcs = [];
         this.animals = []; 
+        this.boats = []; // NEW: Track placed boats
         this.loot = [];
         this.projectiles = [];
         this.particles = [];
@@ -86,8 +84,12 @@ export default class Game {
 
     saveGame() {
         const data = {
-            player: { x: this.player.x, y: this.player.y, hp: this.player.hp, inventory: this.player.inventory },
-            world: this.world.exportData()
+            player: { 
+                x: this.player.x, y: this.player.y, hp: this.player.hp, 
+                inventory: this.player.inventory, inBoat: this.player.inBoat 
+            },
+            world: this.world.exportData(),
+            boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp})) // Save boats
         };
         try { localStorage.setItem('pixelWarfareSave', JSON.stringify(data)); this.showMessage("GAME SAVED", "#0f0"); } 
         catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
@@ -102,8 +104,18 @@ export default class Game {
             this.dom.seed.innerText = this.world.seed;
             this.player.x = data.player.x; this.player.y = data.player.y;
             this.player.hp = data.player.hp; this.player.inventory = data.player.inventory || {};
+            this.player.inBoat = data.player.inBoat || false; // Restore boat state
             this.player.isMoving = false;
+            
             this.npcs = []; this.animals = []; this.projectiles = []; this.particles = []; this.loot = []; this.texts = [];
+            
+            // Restore boats
+            this.boats = (data.boats || []).map(b => {
+                const boat = new Boat(b.x, b.y);
+                boat.hp = b.hp;
+                return boat;
+            });
+
             this.recalcCannons(); this.updateUI(); this.showMessage("GAME LOADED", "#0f0");
         } catch (e) { console.error(e); this.showMessage("LOAD FAILED", "#f00"); }
     }
@@ -202,7 +214,6 @@ export default class Game {
             const gx = Math.floor(x/CONFIG.TILE_SIZE); const gy = Math.floor(y/CONFIG.TILE_SIZE);
             if (isSafe(gx, gy)) return {x, y};
         }
-        // Return NULL if no spawn found (triggers regen)
         return null; 
     }
 
@@ -233,11 +244,12 @@ export default class Game {
 
         const isOccupied = (tx, ty) => {
             const tileCenter = { x: tx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: ty * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
-            const allEntities = [this.player, ...this.npcs, ...this.animals];
+            const allEntities = [this.player, ...this.npcs, ...this.animals, ...this.boats];
             return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
         };
 
         if (this.input.mouse.clickedLeft) {
+            
             const clickedTile = this.world.getTile(gx, gy);
             if (clickedTile === TILES.WOOD_WALL.id) {
                 this.world.setTile(gx, gy, TILES.WOOD_WALL_OPEN.id);
@@ -305,6 +317,24 @@ export default class Game {
                 if (occupied) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
 
                 if (affordable) {
+                    // --- NEW: BOAT BUILDING LOGIC ---
+                    if (this.activeBlueprint.special === 'boat') {
+                        // Can place on Water OR Sand
+                        const targetId = this.world.getTile(gx, gy);
+                        const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id, TILES.SAND.id];
+                        if (!allowed.includes(targetId)) {
+                            this.spawnText(mx * this.zoom, my * this.zoom, "INVALID LOCATION", "#f00");
+                            return;
+                        }
+                        
+                        this.boats.push(new Boat((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16));
+                        for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
+                        this.spawnParticles((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16, '#8B4513', 8);
+                        this.updateUI();
+                        return; // Skip normal tile building
+                    }
+                    // --------------------------------
+
                     const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
 
                     if (this.activeBlueprint.special === 'bridge') {
@@ -353,6 +383,46 @@ export default class Game {
                 }
             }
         } else if (this.input.mouse.clickedRight) {
+            
+            // --- NEW: BOAT INTERACTION (ENTER/LEAVE) ---
+            if (this.player.inBoat) {
+                // EXIT BOAT Logic
+                const clickedTile = this.world.getTile(gx, gy);
+                if (clickedTile === TILES.SAND.id || clickedTile === TILES.GRASS.id) {
+                    // Can only exit onto land
+                    const dist = Utils.distance(this.player, {x: mx, y: my});
+                    if (dist < 60) {
+                        // FIX: Save boat position (water) BEFORE moving player to land
+                        const boatSpawnX = this.player.x;
+                        const boatSpawnY = this.player.y;
+
+                        this.player.inBoat = false;
+                        this.player.x = (gx * CONFIG.TILE_SIZE) + 16;
+                        this.player.y = (gy * CONFIG.TILE_SIZE) + 16;
+                        
+                        // Spawn ONE boat at the old position
+                        this.boats.push(new Boat(boatSpawnX, boatSpawnY));
+                        
+                        this.spawnText(this.player.x, this.player.y, "EXIT BOAT", "#fff");
+                        return;
+                    }
+                }
+            } else {
+                // ENTER BOAT Logic
+                const clickedBoatIndex = this.boats.findIndex(b => Utils.distance(b, {x:mx, y:my}) < 32);
+                if (clickedBoatIndex !== -1) {
+                    if (Utils.distance(this.player, this.boats[clickedBoatIndex]) < 60) {
+                        this.player.inBoat = true;
+                        this.player.x = this.boats[clickedBoatIndex].x;
+                        this.player.y = this.boats[clickedBoatIndex].y;
+                        this.boats.splice(clickedBoatIndex, 1); // Remove entity, player becomes boat
+                        this.spawnText(this.player.x, this.player.y, "ENTER BOAT", "#fff");
+                        return;
+                    }
+                }
+            }
+            // -------------------------------------------
+
             const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
                 clickedSheep.hasWool = false;
@@ -527,11 +597,18 @@ export default class Game {
             const ny = this.player.y + Math.sin(ang)*dist;
             const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
             const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
-            const tile = this.world.getTile(ngx, ngy);
-            const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
-            const isWater = tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
-            if (elevation < 0.35 && !isWater && !ID_TO_TILE[tile].solid) {
-                this.npcs.push(new Entity(nx, ny, 'npc'));
+            
+            // Collision check before spawning
+            const spawnPoint = {x: nx, y: ny};
+            const occupied = [...this.npcs, ...this.animals].some(e => Utils.distance(e, spawnPoint) < CONFIG.TILE_SIZE);
+            
+            if (!occupied) {
+                const tile = this.world.getTile(ngx, ngy);
+                const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
+                const isWater = tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
+                if (elevation < 0.35 && !isWater && !ID_TO_TILE[tile].solid) {
+                    this.npcs.push(new Entity(nx, ny, 'npc'));
+                }
             }
         }
 
@@ -543,9 +620,15 @@ export default class Game {
             const ny = this.player.y + Math.sin(ang)*dist;
             const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
             const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
-            const tile = this.world.getTile(ngx, ngy);
-            if (tile === TILES.GRASS.id && this.world.getTile(ngx+1, ngy) !== TILES.WATER.id) {
-                this.animals.push(new Sheep(nx, ny));
+            
+            const spawnPoint = {x: nx, y: ny};
+            const occupied = [...this.npcs, ...this.animals].some(e => Utils.distance(e, spawnPoint) < CONFIG.TILE_SIZE);
+
+            if (!occupied) {
+                const tile = this.world.getTile(ngx, ngy);
+                if (tile === TILES.GRASS.id && this.world.getTile(ngx+1, ngy) !== TILES.WATER.id) {
+                    this.animals.push(new Sheep(nx, ny));
+                }
             }
         }
 
@@ -553,10 +636,8 @@ export default class Game {
             const ang = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
             npc.move(Math.cos(ang)*2, Math.sin(ang)*2, this.world);
             
-            // --- NPC ANIMATION UPDATE ---
-            npc.isMoving = true; // NPCs (Enemies) always move
+            npc.isMoving = true; 
             npc.moveTime += dt;
-            // ----------------------------
             
             if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
                 if (!this.godMode) {
@@ -578,10 +659,7 @@ export default class Game {
 
         this.animals.forEach(s => {
             s.updateAI(dt, this.player, this.world);
-            
-            // --- SHEEP ANIMATION UPDATE ---
             if (s.isMoving) s.moveTime += dt;
-            // ------------------------------
             
             if (s.fed) {
                 this.animals.forEach(mate => {
@@ -682,10 +760,13 @@ export default class Game {
     }
 
     drawHealth(e) {
+        // FIXED: Only show HP bar if damaged
+        if (e.hp >= e.maxHp) return;
+        
         const w = 24, h = 4;
         const x = e.x - w/2, y = e.y - CONFIG.TILE_SIZE/2 - 8;
         this.ctx.fillStyle = '#300'; this.ctx.fillRect(x, y, w, h);
-        this.ctx.fillStyle = '#0f0'; this.ctx.fillRect(x, y, w * (Math.max(0,e.hp)/100), h);
+        this.ctx.fillStyle = '#0f0'; this.ctx.fillRect(x, y, w * (Math.max(0,e.hp)/e.maxHp), h);
     }
 
     draw() {
@@ -710,6 +791,7 @@ export default class Game {
 
         this.npcs.forEach(n => addToBucket(n, 'npc'));
         this.animals.forEach(n => addToBucket(n, 'sheep')); 
+        this.boats.forEach(n => addToBucket(n, 'boat')); // NEW: Render Boats
         addToBucket(this.player, 'player');
         this.loot.forEach(l => addToBucket(l, 'loot'));
 
@@ -894,11 +976,31 @@ export default class Game {
 
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
-                    if (obj._type === 'loot') {
+                    // --- RENDER BOAT (Unoccupied) ---
+                    if (obj._type === 'boat') {
+                        this.ctx.fillStyle = '#8B4513';
+                        // Boat shape
+                        this.ctx.fillRect(obj.x - 12, obj.y - 6, 24, 12);
+                        this.ctx.fillStyle = '#5C3317';
+                        this.ctx.fillRect(obj.x - 8, obj.y - 4, 16, 8); // Inner part
+                        
+                        // Mast (simple)
+                        this.ctx.fillStyle = '#333';
+                        this.ctx.fillRect(obj.x - 2, obj.y - 16, 4, 16);
+                        
+                        // Sail
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(obj.x, obj.y - 16);
+                        this.ctx.lineTo(obj.x + 12, obj.y - 10);
+                        this.ctx.lineTo(obj.x, obj.y - 4);
+                        this.ctx.fill();
+                    } else if (obj._type === 'loot') {
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else if (obj._type === 'sheep') {
+                        // [Existing Sheep Render logic]
                         const isMoving = obj._orig.moveTimer > 0;
                         const tick = isMoving ? (Date.now() * 0.015) : (Date.now() * 0.005);
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 2 : 0;
@@ -925,7 +1027,22 @@ export default class Game {
                         
                         this.drawHealth(obj._orig);
                     } else {
+                        // PLAYER/NPC
                         const isPlayer = obj._type === 'player';
+                        const inBoat = isPlayer && obj._orig.inBoat; // Check if this entity is in a boat
+
+                        // If in boat, draw the boat under them
+                        if (inBoat) {
+                            this.ctx.fillStyle = '#8B4513';
+                            this.ctx.fillRect(obj.x - 12, obj.y - 2, 24, 12);
+                            this.ctx.fillStyle = '#fff'; // Sail
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(obj.x, obj.y - 16);
+                            this.ctx.lineTo(obj.x + 12, obj.y - 10);
+                            this.ctx.lineTo(obj.x, obj.y - 4);
+                            this.ctx.fill();
+                        }
+
                         const colorShirt = isPlayer ? '#3498db' : '#993333';
                         const colorPants = isPlayer ? '#8B4513' : '#654321';
                         const colorSkin = isPlayer ? '#ffcc99' : '#e0b090';
@@ -935,7 +1052,6 @@ export default class Game {
                         const isMoving = obj._orig.isMoving;
                         const tick = isMoving ? (obj._orig.moveTime * 0.015) : (Date.now() * 0.005);
                         
-                        // DAMPENED BOBBING (1.5px instead of 3px)
                         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
                         
                         const stride = 4;
@@ -949,19 +1065,28 @@ export default class Game {
                         const BODY_W = 16;
                         const BODY_X = obj.x - BODY_W / 2;
                         
-                        this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                        this.ctx.beginPath();
-                        this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
-                        this.ctx.fill();
+                        // Only draw shadow if not in boat (boat has its own presence)
+                        if (!inBoat) {
+                            this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                            this.ctx.beginPath();
+                            this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
+                            this.ctx.fill();
+                        }
 
-                        this.ctx.fillStyle = colorBoots;
-                        this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
-                        this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
+                        // FEET (Hidden if in boat)
+                        if (!inBoat) {
+                            this.ctx.fillStyle = colorBoots;
+                            this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
+                            this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
+                        }
 
-                        const torsoY = obj.y - 8 - bounceY;
+                        // If in boat, shift body up slightly
+                        const boatOffset = inBoat ? -4 : 0;
+                        const torsoY = obj.y - 8 - bounceY + boatOffset;
 
+                        // LEGS
                         this.ctx.fillStyle = colorPants;
-                        this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY, BODY_W, 6); 
+                        this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY + boatOffset, BODY_W, 6); 
 
                         this.ctx.fillStyle = colorShirt;
                         this.ctx.fillRect(BODY_X, torsoY, BODY_W, 15); 

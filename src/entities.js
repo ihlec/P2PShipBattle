@@ -42,33 +42,52 @@ export class Entity {
         this.x = x; this.y = y; this.type = type;
         this.speed = CONFIG.PLAYER_SPEED_BASE;
         this.hp = 100;
+        this.maxHp = 100; // NEW: For HP bar display logic
         this.damageBuffer = 0;
         this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0, [TILES.WOOL.id]: 0 };
         this.selectedTile = TILES.GREY.id;
         this.direction = { x: 0, y: 1 };
-        
-        // Animation State
         this.isMoving = false;
         this.moveTime = 0;
+        this.inBoat = false; // NEW
     }
     
     move(dx, dy, world) {
         const half = (CONFIG.TILE_SIZE / 2) - 4; 
+        
+        // Collision Logic Switch
         const check = (tx, ty) => {
-            if (world.isSolid(Math.floor((tx - half)/CONFIG.TILE_SIZE), Math.floor((ty - half)/CONFIG.TILE_SIZE))) return false;
-            if (world.isSolid(Math.floor((tx + half)/CONFIG.TILE_SIZE), Math.floor((ty - half)/CONFIG.TILE_SIZE))) return false;
-            if (world.isSolid(Math.floor((tx - half)/CONFIG.TILE_SIZE), Math.floor((ty + half)/CONFIG.TILE_SIZE))) return false;
-            if (world.isSolid(Math.floor((tx + half)/CONFIG.TILE_SIZE), Math.floor((ty + half)/CONFIG.TILE_SIZE))) return false;
-            return true;
+            const gx = Math.floor(tx / CONFIG.TILE_SIZE);
+            const gy = Math.floor(ty / CONFIG.TILE_SIZE);
+            const tileId = world.getTile(gx, gy);
+            
+            if (this.inBoat) {
+                // BOAT MODE: Move on Water/Deep Water only
+                if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return true;
+                return false; // Land is solid for a boat
+            } else {
+                // NORMAL MODE: Water is solid, everything else checked by world.isSolid
+                if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return false;
+                if (world.isSolid(gx, gy)) return false;
+                return true;
+            }
         };
         
+        // Four corners collision check
+        const verify = (nx, ny) => {
+            if (!check(nx - half, ny - half)) return false;
+            if (!check(nx + half, ny - half)) return false;
+            if (!check(nx - half, ny + half)) return false;
+            if (!check(nx + half, ny + half)) return false;
+            return true;
+        }
+
         const attemptedX = this.x + dx;
         const attemptedY = this.y + dy;
 
-        if (check(attemptedX, this.y)) this.x = attemptedX;
-        if (check(this.x, attemptedY)) this.y = attemptedY;
+        if (verify(attemptedX, this.y)) this.x = attemptedX;
+        if (verify(this.x, attemptedY)) this.y = attemptedY;
 
-        // Update direction and moving state
         if (dx !== 0 || dy !== 0) {
             this.direction = { x: dx, y: dy };
             this.isMoving = true;
@@ -77,9 +96,17 @@ export class Entity {
             this.isMoving = false;
         }
 
+        // Speed calculation based on terrain and boat state
         const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
         const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
-        this.speed = (world.getTile(gx, gy) === TILES.GREY.id) ? CONFIG.PLAYER_SPEED_ROAD : CONFIG.PLAYER_SPEED_BASE;
+        const currentTile = world.getTile(gx, gy);
+
+        if (this.inBoat) {
+            if (currentTile === TILES.DEEP_WATER.id) this.speed = CONFIG.PLAYER_SPEED_DEEP_WATER;
+            else this.speed = CONFIG.PLAYER_SPEED_WATER;
+        } else {
+            this.speed = (currentTile === TILES.GREY.id) ? CONFIG.PLAYER_SPEED_ROAD : CONFIG.PLAYER_SPEED_BASE;
+        }
     }
 }
 
@@ -87,6 +114,7 @@ export class Sheep extends Entity {
     constructor(x, y) {
         super(x, y, 'sheep');
         this.hp = 30;
+        this.maxHp = 30;
         this.moveTimer = 0;
         this.moveAngle = 0;
         this.fed = false; 
@@ -113,5 +141,14 @@ export class Sheep extends Entity {
             }
             this.move(Math.cos(this.moveAngle) * 0.5, Math.sin(this.moveAngle) * 0.5, world);
         }
+    }
+}
+
+// NEW ENTITY
+export class Boat extends Entity {
+    constructor(x, y) {
+        super(x, y, 'boat');
+        this.hp = 100;
+        this.maxHp = 100;
     }
 }
