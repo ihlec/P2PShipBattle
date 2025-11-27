@@ -80,11 +80,20 @@ export class Sheep extends Entity {
         this.hp = 30;
         this.moveTimer = 0;
         this.moveAngle = 0;
-        this.fed = false; // "Love mode"
+        this.fed = false; 
         this.hasWool = true;
+        this.woolTimer = 0; // Regrowth timer
     }
 
     updateAI(dt, player, world) {
+        // Wool Regrowth
+        if (!this.hasWool) {
+            this.woolTimer--;
+            if (this.woolTimer <= 0) {
+                this.hasWool = true;
+            }
+        }
+
         const dist = Utils.distance(this, player);
         
         // 1. Flee Logic
@@ -99,7 +108,6 @@ export class Sheep extends Entity {
                 this.moveTimer = 60 + Math.random() * 60;
                 this.moveAngle = Math.random() * 6.28;
             }
-            // Move slowly (0.5 speed)
             this.move(Math.cos(this.moveAngle) * 0.5, Math.sin(this.moveAngle) * 0.5, world);
         }
     }

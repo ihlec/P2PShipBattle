@@ -22,7 +22,7 @@ export default class Game {
         this.player.x = spawn.x; this.player.y = spawn.y;
 
         this.npcs = [];
-        this.animals = []; // Stores Sheep
+        this.animals = []; 
         this.loot = [];
         this.projectiles = [];
         this.particles = [];
@@ -222,6 +222,21 @@ export default class Game {
 
         if (this.input.mouse.clickedLeft) {
             
+            // --- NEW: FENCE GATE LOGIC ---
+            // If we click a fence/gate, toggle it. This prevents shooting when opening gates.
+            const clickedTile = this.world.getTile(gx, gy);
+            if (clickedTile === TILES.WOOD_WALL.id) {
+                this.world.setTile(gx, gy, TILES.WOOD_WALL_OPEN.id);
+                this.spawnParticles(mx, my, TILES.WOOD.color, 4);
+                return;
+            } else if (clickedTile === TILES.WOOD_WALL_OPEN.id) {
+                if (isOccupied(gx, gy)) { this.spawnText(mx, my, "BLOCKED", "#f00"); return; }
+                this.world.setTile(gx, gy, TILES.WOOD_WALL.id);
+                this.spawnParticles(mx, my, TILES.WOOD.color, 4);
+                return;
+            }
+            // ----------------------------
+
             // --- SHEEP INTERACTION (FEEDING) ---
             if (this.player.selectedTile === TILES.GREENS.id) {
                 const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
@@ -229,14 +244,13 @@ export default class Game {
                     if (this.player.inventory[TILES.GREENS.id] > 0 || this.godMode) {
                         if(!this.godMode) this.player.inventory[TILES.GREENS.id]--;
                         clickedSheep.fed = true;
-                        this.spawnParticles(clickedSheep.x, clickedSheep.y, '#ff00ff', 5); // Love particles
+                        this.spawnParticles(clickedSheep.x, clickedSheep.y, '#ff00ff', 5);
                         this.spawnText(clickedSheep.x, clickedSheep.y - 10, "❤️", "#f0f");
                         this.updateUI();
                         return;
                     }
                 }
             }
-            // -----------------------------------
 
             if (!this.activeBlueprint && this.player.selectedTile === TILES.GREY.id) {
                 this.throwStone(mx, my);
@@ -332,6 +346,7 @@ export default class Game {
             const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
                 clickedSheep.hasWool = false;
+                clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME; // Start regrowth timer
                 this.loot.push({x: clickedSheep.x, y: clickedSheep.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
                 this.spawnParticles(clickedSheep.x, clickedSheep.y, '#eee', 5);
                 return;
@@ -346,7 +361,7 @@ export default class Game {
                 let tileId = this.world.getTile(gx, gy);
                 const tileDef = ID_TO_TILE[tileId];
 
-                if (!tileDef.solid && tileId !== TILES.TREE.id) {
+                if (!tileDef.solid && tileId !== TILES.TREE.id && tileId !== TILES.WOOD_WALL_OPEN.id) {
                     let below = this.world.getTile(gx, gy + 1);
                     if ([12,14,15].includes(below)) { tileId = below; } 
                     else {
@@ -383,7 +398,7 @@ export default class Game {
                              if (Math.random() < 0.01) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
                         } else if ([12,14,15].includes(tileId)) {
                              this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 4, bob: Math.random()*100});
-                        } else if (tileId === TILES.WOOD_WALL.id) {
+                        } else if (tileId === TILES.WOOD_WALL.id || tileId === TILES.WOOD_WALL_OPEN.id) {
                              this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
                         } else if (tileId === TILES.WALL.id) {
                              this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 1, bob: Math.random()*100});
@@ -511,7 +526,7 @@ export default class Game {
             }
         }
 
-        // Sheep Spawn (Higher chance on Grass)
+        // Sheep Spawn
         if (this.animals.length < 10 && Math.random() < 0.005) {
             const ang = Math.random() * 6.28;
             const dist = 600;
@@ -547,11 +562,9 @@ export default class Game {
             }
         });
 
-        // --- SHEEP LOGIC ---
         this.animals.forEach(s => {
             s.updateAI(dt, this.player, this.world);
             
-            // Breeding Check
             if (s.fed) {
                 this.animals.forEach(mate => {
                     if (s !== mate && mate.fed && Utils.distance(s, mate) < 20) {
@@ -564,7 +577,6 @@ export default class Game {
                 });
             }
         });
-        // ------------------
         
         this.cannons.forEach(c => {
             if (c.cooldown > 0) c.cooldown--;
@@ -582,7 +594,9 @@ export default class Game {
         this.projectiles.forEach(p => {
             p.update();
             if (p.owner === 'player' || p.owner === 'enemy') { 
-                this.npcs.forEach(n => {
+                // --- MERGED COLLISION LOGIC: Hits NPCs AND Animals ---
+                const potentialTargets = [...this.npcs, ...this.animals];
+                potentialTargets.forEach(n => {
                     if (p.active && Utils.distance(p, n) < 16) {
                         p.active = false;
                         n.hp -= p.damage;
@@ -595,7 +609,6 @@ export default class Game {
 
         this.projectiles = this.projectiles.filter(p => p.active);
 
-        // Cleanup Dead Entities
         const cleanup = (arr) => arr.filter(n => {
             if (n.hp <= 0) {
                 const roll = Math.random();
@@ -606,7 +619,6 @@ export default class Game {
                      dropId = TILES.WOOL.id; 
                      qty = 2;
                 } else {
-                     // NPC Drops
                      if (roll < 0.10) { dropId = TILES.GOLD.id; qty = 2; } 
                      else if (roll < 0.40) { dropId = TILES.WOOD.id; qty = 5; } 
                      else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
@@ -680,7 +692,7 @@ export default class Game {
         };
 
         this.npcs.forEach(n => addToBucket(n, 'npc'));
-        this.animals.forEach(n => addToBucket(n, 'sheep')); // Bucket for Sheep
+        this.animals.forEach(n => addToBucket(n, 'sheep')); 
         addToBucket(this.player, 'player');
         this.loot.forEach(l => addToBucket(l, 'loot'));
 
@@ -691,11 +703,24 @@ export default class Game {
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
 
-                if ((!tile.solid || id === TILES.WATER.id || id === TILES.DEEP_WATER.id) && id !== TILES.TREE.id) {
+                if ((!tile.solid || id === TILES.WATER.id || id === TILES.DEEP_WATER.id) && id !== TILES.TREE.id && id !== TILES.WOOD_WALL_OPEN.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                }
+                
+                // --- OPEN FENCE RENDER ---
+                if (id === TILES.WOOD_WALL_OPEN.id) {
+                    const tx = c * CONFIG.TILE_SIZE;
+                    const ty = r * CONFIG.TILE_SIZE;
+                    // Draw grass background
+                    this.ctx.fillStyle = TILES.GRASS.color;
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    // Draw open gate posts
+                    this.ctx.fillStyle = tile.color;
+                    this.ctx.fillRect(tx, ty, 6, CONFIG.TILE_SIZE);
+                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 6, ty, 6, CONFIG.TILE_SIZE);
                 }
                 
                 if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id) {
@@ -861,7 +886,6 @@ export default class Game {
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else if (obj._type === 'sheep') {
                         // DRAW SHEEP
-                        // Body
                         this.ctx.fillStyle = obj.fed ? '#ffcccc' : (obj.hasWool ? '#eeeeee' : '#aaaaaa');
                         this.ctx.fillRect(obj.x - 10, obj.y - 10, 20, 14);
                         // Head

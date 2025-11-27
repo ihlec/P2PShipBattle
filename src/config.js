@@ -4,7 +4,8 @@ export const CONFIG = {
     PLAYER_SPEED_ROAD: 3,
     NPC_SPAWN_RATE: 0.002, 
     BUILD_RANGE: 400,
-    MAX_NPCS: 30
+    MAX_NPCS: 30,
+    WOOL_REGROW_TIME: 36000 // 10 minutes * 60 seconds * 60 fps
 };
 
 export const TILES = {
@@ -25,13 +26,17 @@ export const TILES = {
     TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir', hp: 300 },
     TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd', hp: 500 },
     ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' },
-    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Wood Wall', short: 'W.Wal', hp: 50 },
+    
+    // Fences / Gates
+    WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Fence (Closed)', short: 'Fnc.C', hp: 50 },
+    WOOD_WALL_OPEN: { id: 23, color: '#5C3317', solid: false, name: 'Fence (Open)', short: 'Fnc.O', hp: 50 }, // NEW
+
     WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral', hp: 30 },
     TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
     MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt', hp: 200 },
     GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' },
     
-    // Items (No block equivalent necessarily, but sharing ID space)
+    // Items
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' }
 };
 
@@ -42,7 +47,7 @@ export const BLUEPRINTS = [
     { name: "Iron Tower", structure: [{x:0, y:0, id: TILES.TOWER_BASE_IRON.id}], cost: { [TILES.GREY.id]: 1, [TILES.IRON.id]: 3, [TILES.WOOD.id]: 1 } },
     { name: "Gold Tower", structure: [{x:0, y:0, id: TILES.TOWER_BASE_GOLD.id}], cost: { [TILES.GREY.id]: 1, [TILES.GOLD.id]: 3, [TILES.WOOD.id]: 1 } },
     { name: "Stone Wall", structure: [{x:0, y:0, id: TILES.WALL.id}], cost: { [TILES.GREY.id]: 2 } },
-    { name: "Wood Wall", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
+    { name: "Fence/Gate", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } }, // Renamed
     { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
     { name: "Road Segment", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1 } }
 ];
