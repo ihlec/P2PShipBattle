@@ -174,7 +174,7 @@ export default class Game {
             slot.id = `slot-${t.id}`;
             slot.innerHTML = `<div class="slot-color" style="background:${t.color}"></div><div class="short-name">${t.short}</div><div class="qty" id="qty-${t.id}">0</div>`;
             slot.onclick = () => {
-                // CHANGED: Deselect Logic
+                // Deselect Logic
                 if (this.player.selectedTile === t.id) {
                     this.player.selectedTile = null;
                 } else {
@@ -255,6 +255,7 @@ export default class Game {
         while(!found && attempts < 3) {
             idx = (idx + 1) % cycle.length;
             const nextId = cycle[idx];
+            // Always allow Stone, others check inventory
             if (nextId === TILES.GREY.id || (this.player.inventory[nextId] || 0) > 0 || this.godMode) {
                 this.player.activeRange = nextId;
                 found = true;
@@ -465,8 +466,6 @@ export default class Game {
             if (!this.activeBlueprint) {
                 const sel = this.player.selectedTile;
                 // Attack if: (None selected) OR (Stone selected, allowing it to act as weapon/build override if preferred)
-                // Given the instruction "Once no resource is selected... range attach", 
-                // we ONLY throw if sel is null.
                 if (!sel) {
                     this.throwProjectile(mx, my);
                     return;
@@ -570,6 +569,16 @@ export default class Game {
                                 }
                             });
                         }
+                        this.updateUI();
+                        this.recalcCannons();
+                    }
+                }
+            } else {
+                if (isOccupied(gx, gy)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
+                const id = this.player.selectedTile;
+                if (canAfford(id, 1)) {
+                    if (this.tryBuild(gx, gy, id, false, false)) {
+                        consume(id, 1);
                         this.updateUI();
                         this.recalcCannons();
                     }
@@ -841,9 +850,13 @@ export default class Game {
             if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
                 // Melee Damage (Passive)
                 const meleeId = this.player.activeMelee;
-                if ((meleeId === TILES.SWORD_WOOD.id || meleeId === TILES.SWORD_IRON.id) && (dx || dy)) {
-                    if (this.shootCooldown <= 0) {
-                        const dmg = meleeId === TILES.SWORD_IRON.id ? 90 : 50;
+                if (dx || dy) {
+                    let dmg = 0;
+                    if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
+                    else if (meleeId === TILES.SWORD_WOOD.id) dmg = 50;
+                    else if (meleeId === 'hand') dmg = 1; // NEW: Hand damage logic
+
+                    if (dmg > 0 && this.shootCooldown <= 0) {
                         npc.hp -= dmg;
                         this.spawnParticles(npc.x, npc.y, '#fff', 8);
                         this.spawnText(npc.x, npc.y, `HIT ${dmg}`, "#ff0");
