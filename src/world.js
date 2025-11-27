@@ -26,4 +26,20 @@ export default class World {
         const key = this.getKey(x, y);
         return this.tileData[key] ? this.tileData[key].dmg : 0;
     }
+
+    // --- SAVE/LOAD SYSTEM ---
+    exportData() {
+        return {
+            seed: this.seed,
+            modifiedTiles: this.modifiedTiles,
+            tileData: this.tileData
+        };
+    }
+
+    importData(data) {
+        if (!data) return;
+        this.seed = data.seed;
+        this.modifiedTiles = data.modifiedTiles || {};
+        this.tileData = data.tileData || {};
+    }
 }

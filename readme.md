@@ -11,10 +11,10 @@ MEDIVALPIXELS/
     └── main.js         (Entry point)
 
 ## TODO
+- shoot stones with leftclick. only build roads via structures menud
 - save game and load game from browser localStorage
 - HP to all structures
 - Do not spwan close to water
-- Shells on the beach for white blocks
 - Sheep fields for whool
 - sheep will alwyas flee from player
 - Two sheep colling have a chance to spwan a new sheep when fed with GRN.

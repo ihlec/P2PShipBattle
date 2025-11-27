@@ -16,12 +16,11 @@ export default class Game {
         this.world = new World();
         this.player = new Entity(0, 0, 'player');
         
-        // --- MODIFIED: ADD ANIMATION STATE TRACKING ---
+        // --- ANIMATION STATE TRACKING ---
         this.player.isMoving = false;
         this.player.moveTime = 0;
-        // ----------------------------------------------
         
-        // --- MOVED SPAWN LOGIC HERE ---
+        // --- SPAWN LOGIC ---
         const spawn = this.findSafeSpawn();
         this.player.x = spawn.x; this.player.y = spawn.y;
 
@@ -56,6 +55,10 @@ export default class Game {
         // Setup Hammer Button
         document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
 
+        // Setup Save/Load Buttons
+        document.getElementById('btn-save').onclick = () => this.saveGame();
+        document.getElementById('btn-load').onclick = () => this.loadGame();
+
         this.initUI();
         
         window.addEventListener('keyup', (e) => {
@@ -69,6 +72,66 @@ export default class Game {
         requestAnimationFrame(t => this.loop(t));
     }
 
+    // --- SAVE / LOAD SYSTEM ---
+    saveGame() {
+        const data = {
+            player: {
+                x: this.player.x,
+                y: this.player.y,
+                hp: this.player.hp,
+                inventory: this.player.inventory
+            },
+            world: this.world.exportData()
+        };
+        try {
+            localStorage.setItem('pixelWarfareSave', JSON.stringify(data));
+            this.showMessage("GAME SAVED", "#0f0");
+        } catch (e) {
+            console.error(e);
+            this.showMessage("SAVE FAILED", "#f00");
+        }
+    }
+
+    loadGame() {
+        const json = localStorage.getItem('pixelWarfareSave');
+        if (!json) {
+            this.showMessage("NO SAVE FOUND", "#f00");
+            return;
+        }
+
+        try {
+            const data = JSON.parse(json);
+
+            // 1. Restore World
+            this.world.importData(data.world);
+            this.dom.seed.innerText = this.world.seed;
+
+            // 2. Restore Player
+            this.player.x = data.player.x;
+            this.player.y = data.player.y;
+            this.player.hp = data.player.hp;
+            this.player.inventory = data.player.inventory || {};
+            this.player.isMoving = false;
+            
+            // 3. Reset Dynamic Entities (Prevents conflicts with old world state)
+            this.npcs = [];
+            this.projectiles = [];
+            this.particles = [];
+            this.loot = [];
+            this.texts = [];
+            
+            // 4. Recalculate derived state
+            this.recalcCannons();
+            this.updateUI();
+            this.showMessage("GAME LOADED", "#0f0");
+
+        } catch (e) {
+            console.error(e);
+            this.showMessage("LOAD FAILED (Corrupt Data)", "#f00");
+        }
+    }
+    // --------------------------
+
     toggleBlueprints() {
         const menu = document.getElementById('blueprint-menu');
         menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid';
@@ -76,9 +139,10 @@ export default class Game {
 
     resize() { this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; }
 
-    showMessage(text) {
+    showMessage(text, color) {
         const msg = document.getElementById('messages');
         msg.innerHTML = text;
+        msg.style.color = color || '#fff';
         msg.style.opacity = 1;
         setTimeout(() => msg.style.opacity = 0, 2000);
     }
@@ -157,15 +221,11 @@ export default class Game {
     findSafeSpawn() {
         const isSafe = (gx, gy) => {
             const t = this.world.getTile(gx, gy);
-            
-            // --- MODIFIED SPAWN LOGIC ---
-            // Only check if the tile is SAND.
-            // We removed the "radius check for water" because Sand is always next to water.
             return t === TILES.SAND.id;
         };
 
         // Attempt 1: Random Sampling (Fast)
-        for (let r = 0; r < 2000; r++) { // Increased attempts slightly since Sand is rare
+        for (let r = 0; r < 2000; r++) { 
             const x = (Math.random() - 0.5) * 5000; 
             const y = (Math.random() - 0.5) * 5000;
             const gx = Math.floor(x/CONFIG.TILE_SIZE);
@@ -195,7 +255,6 @@ export default class Game {
 
         if (Utils.distance(this.player, {x: mx, y: my}) > CONFIG.BUILD_RANGE) return;
 
-        // Helper function to check if a grid tile is occupied by an entity
         const isOccupied = (tx, ty) => {
             const tileCenter = { x: tx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: ty * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
             const allEntities = [this.player, ...this.npcs];
@@ -233,7 +292,6 @@ export default class Game {
                     }
                 }
                 
-                // --- OCCUPANCY CHECK FOR BLUEPRINT ---
                 let occupied = false;
                 if (affordable) {
                     for (const part of this.activeBlueprint.structure) {
@@ -248,7 +306,6 @@ export default class Game {
                     this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BUILD: OCCUPIED", "#f00");
                     return;
                 }
-                // ------------------------------------
 
                 if (affordable) {
                     const isBridgeBp = this.activeBlueprint.special === 'bridge' || this.activeBlueprint.requiresWater;
@@ -291,12 +348,10 @@ export default class Game {
                     }
                 }
             } else {
-                // --- OCCUPANCY CHECK FOR SINGLE TILE ---
                 if (isOccupied(gx, gy)) {
                     this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BUILD: OCCUPIED", "#f00");
                     return;
                 }
-                // ---------------------------------------
                 
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
@@ -374,7 +429,7 @@ export default class Game {
                         });
                     }
 
-                    const isOccupiedOnBreak = tilesToRemove.some(t => isOccupied(t.x, t.y)); // Reuse isOccupied logic
+                    const isOccupiedOnBreak = tilesToRemove.some(t => isOccupied(t.x, t.y)); 
 
                     if (isOccupiedOnBreak) {
                         this.spawnText(mx * this.zoom, my * this.zoom, "CANNOT BREAK: OCCUPIED", "#f00");
@@ -415,8 +470,6 @@ export default class Game {
     }
 
     tryBuild(gx, gy, id, allowRailOverwrite = false, isBridge = false) {
-        // NOTE: The entity occupancy check is now handled in handleInteraction before calling tryBuild.
-        
         const current = this.world.getTile(gx, gy);
         if (current === id) return false;
         
@@ -465,7 +518,7 @@ export default class Game {
         }
     }
 
-update(dt) {
+    update(dt) {
         if (this.input.wheel !== 0) {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
@@ -509,7 +562,6 @@ update(dt) {
             const tile = this.world.getTile(ngx, ngy);
             const elevation = Utils.getElevation(ngx, ngy, this.world.seed);
 
-            // MODIFIED: Check if the tile is any type of water
             const isWater = tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
 
             if (elevation < 0.35 && !isWater && !ID_TO_TILE[tile].solid) {
@@ -829,7 +881,6 @@ update(dt) {
                         const colorHelmet = '#8B6F43';
                         const colorBoots = '#333333';
 
-                        // --- IMPROVED WIGGLE LOGIC: State-driven sine wave ---
                         const MOVE_CYCLE_SPEED = 0.006;
                         const MAX_WIGGLE = 3;
                         
@@ -842,20 +893,17 @@ update(dt) {
                             footShift2 = Math.sin(phase + Math.PI) * MAX_WIGGLE;
                         }
                         
-                        // Hand shift logic
                         let handShift = 0;
                         const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 };
                         const moving = isPlayer && obj._orig.isMoving;
                         if (moving && Math.abs(dir.x) > Math.abs(dir.y)) handShift = Math.sign(dir.x) * 4;
                         
-                        // --- PLAYER DIMENSIONS ---
                         const BODY_W = 16;
                         const BODY_X = obj.x - BODY_W / 2;
                         const HEAD_SIZE = 12;
                         const HEAD_Y = obj.y - 22;
                         const HAND_LEFT_X = obj.x - 10;
                         const HAND_RIGHT_X = obj.x + 6;
-                        // -------------------------
 
                         // 1. FEET/BOOTS
                         this.ctx.fillStyle = colorBoots;
@@ -900,20 +948,17 @@ update(dt) {
                         let eyeX2 = obj.x + 2;
                         let eyeDrawnSize = EYE_SIZE;
 
-                        // Check for movement (or stationary) before determining look direction
                         if (!moving || Math.abs(dir.y) >= Math.abs(dir.x)) {
-                            // Moving Up/Down or Stationary (Y is dominant/static)
-                            if (dir.y < 0 && moving) { // Upwards (North): Hide eyes
+                            if (dir.y < 0 && moving) { 
                                 eyeDrawnSize = 0;
-                            } else { // Downwards (South) or Stationary
+                            } else { 
                                 eyeDrawnSize = EYE_SIZE;
                             }
                         } else if (Math.abs(dir.x) > Math.abs(dir.y)) {
-                            // Moving Left or Right (X is dominant)
-                            if (dir.x < 0) { // Left (West): Eyes shift to left side of face
+                            if (dir.x < 0) { 
                                 eyeX1 = obj.x - 5; 
                                 eyeX2 = obj.x - 2; 
-                            } else { // Right (East): Eyes shift to right side of face
+                            } else { 
                                 eyeX1 = obj.x + 2; 
                                 eyeX2 = obj.x - 1; 
                             }
@@ -924,7 +969,6 @@ update(dt) {
                             this.ctx.fillRect(eyeX1, EYE_Y, eyeDrawnSize, eyeDrawnSize);
                             this.ctx.fillRect(eyeX2, EYE_Y, eyeDrawnSize, eyeDrawnSize);
                         }
-                        // -------------------------------------------------------------------
                         this.drawHealth(obj._orig); 
                     }
                 });
