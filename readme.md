@@ -20,6 +20,7 @@ MEDIVALPIXELS/
 - sheep will alwyas flee from player
 - sheep have a chance to spwan a new sheep when fed with GRN.
 - sheeps can die from damage by thrown objects
+- only show HP bars of player sheep or npcs when dmg was taken. Not on full hp.
 - Wood walls are now fences that open and close on left click. 
 - Boat structure can be build using wood and whool
 - player can enter boat and leaf boat when boat is next to sand

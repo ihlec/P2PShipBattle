@@ -222,8 +222,6 @@ export default class Game {
 
         if (this.input.mouse.clickedLeft) {
             
-            // --- NEW: FENCE GATE LOGIC ---
-            // If we click a fence/gate, toggle it. This prevents shooting when opening gates.
             const clickedTile = this.world.getTile(gx, gy);
             if (clickedTile === TILES.WOOD_WALL.id) {
                 this.world.setTile(gx, gy, TILES.WOOD_WALL_OPEN.id);
@@ -235,9 +233,7 @@ export default class Game {
                 this.spawnParticles(mx, my, TILES.WOOD.color, 4);
                 return;
             }
-            // ----------------------------
 
-            // --- SHEEP INTERACTION (FEEDING) ---
             if (this.player.selectedTile === TILES.GREENS.id) {
                 const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
                 if (clickedSheep && !clickedSheep.fed) {
@@ -259,7 +255,6 @@ export default class Game {
 
             if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return;
 
-            // Cannon Loading
             const cannon = this.cannons.find(c => {
                 const [cx, cy] = c.key.split(',').map(Number);
                 return gx === cx && gy === cy;
@@ -342,16 +337,14 @@ export default class Game {
                 }
             }
         } else if (this.input.mouse.clickedRight) {
-            // --- SHEEP SHEARING ---
             const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
                 clickedSheep.hasWool = false;
-                clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME; // Start regrowth timer
+                clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME;
                 this.loot.push({x: clickedSheep.x, y: clickedSheep.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
                 this.spawnParticles(clickedSheep.x, clickedSheep.y, '#eee', 5);
                 return;
             }
-            // ----------------------
 
             if (this.activeBlueprint) {
                 this.activeBlueprint = null;
@@ -594,7 +587,6 @@ export default class Game {
         this.projectiles.forEach(p => {
             p.update();
             if (p.owner === 'player' || p.owner === 'enemy') { 
-                // --- MERGED COLLISION LOGIC: Hits NPCs AND Animals ---
                 const potentialTargets = [...this.npcs, ...this.animals];
                 potentialTargets.forEach(n => {
                     if (p.active && Utils.distance(p, n) < 16) {
@@ -710,14 +702,11 @@ export default class Game {
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
                 
-                // --- OPEN FENCE RENDER ---
                 if (id === TILES.WOOD_WALL_OPEN.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
-                    // Draw grass background
                     this.ctx.fillStyle = TILES.GRASS.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    // Draw open gate posts
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, 6, CONFIG.TILE_SIZE);
                     this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 6, ty, 6, CONFIG.TILE_SIZE);
@@ -885,19 +874,38 @@ export default class Game {
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                         this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
                     } else if (obj._type === 'sheep') {
-                        // DRAW SHEEP
+                        // --- IMPROVED SHEEP RENDER ---
+                        const isMoving = obj._orig.moveTimer > 0;
+                        const tick = isMoving ? (Date.now() * 0.015) : (Date.now() * 0.005);
+                        const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 2 : 0;
+                        const breathe = !isMoving ? Math.sin(tick) * 0.5 : 0;
+                        
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                        this.ctx.beginPath();
+                        this.ctx.ellipse(obj.x, obj.y + 6, 8, 3, 0, 0, Math.PI * 2);
+                        this.ctx.fill();
+
+                        const bodyY = obj.y - 10 - bounceY - breathe;
+
+                        // Legs
+                        const legOffset1 = isMoving ? Math.sin(tick)*3 : 0;
+                        const legOffset2 = isMoving ? Math.sin(tick+Math.PI)*3 : 0;
+                        this.ctx.fillStyle = '#111';
+                        this.ctx.fillRect(obj.x - 6 + legOffset1, obj.y + 2, 3, 6);
+                        this.ctx.fillRect(obj.x + 3 + legOffset2, obj.y + 2, 3, 6);
+
+                        // Body
                         this.ctx.fillStyle = obj.fed ? '#ffcccc' : (obj.hasWool ? '#eeeeee' : '#aaaaaa');
-                        this.ctx.fillRect(obj.x - 10, obj.y - 10, 20, 14);
+                        this.ctx.fillRect(obj.x - 10, bodyY, 20, 14);
+                        
                         // Head
                         this.ctx.fillStyle = '#111';
-                        this.ctx.fillRect(obj.x + 8, obj.y - 12, 8, 8);
-                        // Legs
-                        this.ctx.fillStyle = '#111';
-                        this.ctx.fillRect(obj.x - 8, obj.y + 4, 4, 6);
-                        this.ctx.fillRect(obj.x + 4, obj.y + 4, 4, 6);
+                        this.ctx.fillRect(obj.x + 8, bodyY - 2, 8, 8);
+                        
                         this.drawHealth(obj._orig);
                     } else {
-                        // DRAW PLAYER / NPC
+                        // --- IMPROVED PLAYER/NPC ANIMATION ---
                         const isPlayer = obj._type === 'player';
                         const colorShirt = isPlayer ? '#3498db' : '#993333';
                         const colorPants = isPlayer ? '#8B4513' : '#654321';
@@ -905,94 +913,76 @@ export default class Game {
                         const colorHelmet = '#8B6F43';
                         const colorBoots = '#333333';
 
-                        const MOVE_CYCLE_SPEED = 0.006;
-                        const MAX_WIGGLE = 3;
+                        const isMoving = obj._orig.isMoving;
+                        const tick = isMoving ? (obj._orig.moveTime * 0.015) : (Date.now() * 0.005);
                         
-                        let footShift1 = 0;
-                        let footShift2 = 0;
+                        // 1. Bobbing (Vertical Bounce) - DAMPENED AS REQUESTED
+                        const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
+                        
+                        // 2. Leg Movement (Sine wave)
+                        const stride = 4;
+                        const leg1Offset = isMoving ? Math.sin(tick) * stride : 0;
+                        const leg2Offset = isMoving ? Math.sin(tick + Math.PI) * stride : 0;
+                        
+                        // 3. Arm Movement (Opposite to legs)
+                        const armSwing = 5;
+                        const arm1Offset = isMoving ? Math.sin(tick + Math.PI) * armSwing : 0;
+                        const arm2Offset = isMoving ? Math.sin(tick) * armSwing : 0;
 
-                        if (isPlayer && obj._orig.isMoving) {
-                            const phase = (obj._orig.moveTime * MOVE_CYCLE_SPEED) % (2 * Math.PI);
-                            footShift1 = Math.sin(phase) * MAX_WIGGLE; 
-                            footShift2 = Math.sin(phase + Math.PI) * MAX_WIGGLE;
-                        }
-                        
-                        let handShift = 0;
-                        const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 };
-                        const moving = isPlayer && obj._orig.isMoving;
-                        if (moving && Math.abs(dir.x) > Math.abs(dir.y)) handShift = Math.sign(dir.x) * 4;
-                        
                         const BODY_W = 16;
                         const BODY_X = obj.x - BODY_W / 2;
-                        const HEAD_SIZE = 12;
-                        const HEAD_Y = obj.y - 22;
-                        const HAND_LEFT_X = obj.x - 10;
-                        const HAND_RIGHT_X = obj.x + 6;
+                        
+                        // Shadow
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                        this.ctx.beginPath();
+                        this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
+                        this.ctx.fill();
 
-                        // 1. FEET/BOOTS
+                        // FEET
                         this.ctx.fillStyle = colorBoots;
-                        this.ctx.fillRect(BODY_X + footShift1, obj.y + 10, 4, 4); 
-                        this.ctx.fillRect(BODY_X + BODY_W - 4 + footShift2, obj.y + 10, 4, 4); 
+                        this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4); 
+                        this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4); 
 
-                        // 2. LEGS (Pants)
+                        const torsoY = obj.y - 8 - bounceY;
+
+                        // LEGS
                         this.ctx.fillStyle = colorPants;
-                        this.ctx.fillRect(BODY_X, obj.y + 4, BODY_W, 6); 
+                        this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY, BODY_W, 6); 
 
-                        // 3. BODY (Shirt/Tunic)
+                        // BODY
                         this.ctx.fillStyle = colorShirt;
-                        this.ctx.fillRect(BODY_X, obj.y - 8, BODY_W, 15); 
+                        this.ctx.fillRect(BODY_X, torsoY, BODY_W, 15); 
                         
-                        // 4. HANDS/ARMS
+                        // ARMS (With swing)
                         this.ctx.fillStyle = colorSkin;
-                        
-                        if (handShift > 0) {
-                            this.ctx.fillRect(HAND_LEFT_X + handShift, obj.y - 4, 4, 4); 
-                            this.ctx.fillRect(HAND_RIGHT_X, obj.y - 4, 4, 4);           
-                        } else if (handShift < 0) {
-                            this.ctx.fillRect(HAND_LEFT_X, obj.y - 4, 4, 4);          
-                            this.ctx.fillRect(HAND_RIGHT_X + handShift, obj.y - 4, 4, 4); 
-                        } else {
-                            this.ctx.fillRect(HAND_LEFT_X, obj.y - 4, 4, 4); 
-                            this.ctx.fillRect(HAND_RIGHT_X, obj.y - 4, 4, 4);  
-                        }
+                        this.ctx.fillRect(obj.x - 12, torsoY + 4 + arm1Offset, 4, 4); // Left Arm
+                        this.ctx.fillRect(obj.x + 8, torsoY + 4 + arm2Offset, 4, 4);  // Right Arm
 
-                        // 5. HEAD 
+                        // HEAD 
+                        const HEAD_SIZE = 12;
+                        const HEAD_Y = torsoY - 14;
                         this.ctx.fillStyle = colorSkin;
                         this.ctx.fillRect(obj.x - HEAD_SIZE/2, HEAD_Y, HEAD_SIZE, HEAD_SIZE); 
 
-                        // 6. HELMET/HAT
-                        const HELMET_Y = HEAD_Y - 4;
+                        // HELMET
                         this.ctx.fillStyle = colorHelmet;
-                        this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HELMET_Y, HEAD_SIZE + 2, 6); 
+                        this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6); 
 
-                        // 7. EYES (Directional Logic)
-                        const EYE_SIZE = 3;
-                        const EYE_Y = HEAD_Y + 3; 
+                        // EYES
+                        const dir = isPlayer ? obj._orig.direction : { x: 0, y: 1 };
                         let eyeX1 = obj.x - 5;
                         let eyeX2 = obj.x + 2;
-                        let eyeDrawnSize = EYE_SIZE;
-
-                        if (!moving || Math.abs(dir.y) >= Math.abs(dir.x)) {
-                            if (dir.y < 0 && moving) { 
-                                eyeDrawnSize = 0;
-                            } else { 
-                                eyeDrawnSize = EYE_SIZE;
-                            }
-                        } else if (Math.abs(dir.x) > Math.abs(dir.y)) {
-                            if (dir.x < 0) { 
-                                eyeX1 = obj.x - 5; 
-                                eyeX2 = obj.x - 2; 
-                            } else { 
-                                eyeX1 = obj.x + 2; 
-                                eyeX2 = obj.x - 1; 
-                            }
-                        }
                         
-                        if (eyeDrawnSize > 0) {
+                        // Simple eye logic based on direction
+                        if (dir.x > 0) { eyeX1 += 2; eyeX2 += 2; }
+                        if (dir.x < 0) { eyeX1 -= 2; eyeX2 -= 2; }
+                        
+                        if (dir.y >= 0) { // Only draw eyes if facing down or sideways
                             this.ctx.fillStyle = '#000000';
-                            this.ctx.fillRect(eyeX1, EYE_Y, eyeDrawnSize, eyeDrawnSize);
-                            this.ctx.fillRect(eyeX2, EYE_Y, eyeDrawnSize, eyeDrawnSize);
+                            this.ctx.fillRect(eyeX1, HEAD_Y + 4, 3, 3);
+                            this.ctx.fillRect(eyeX2, HEAD_Y + 4, 3, 3);
                         }
+
                         this.drawHealth(obj._orig); 
                     }
                 });
