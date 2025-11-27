@@ -24,7 +24,7 @@ export class Projectile {
         this.active = true;
         this.owner = isPlayerOwner ? 'player' : 'enemy';
         this.life = 100; 
-        this.type = type; // 'stone' or 'spear'
+        this.type = type; 
         
         this.angle = Math.atan2(ty - y, tx - x);
         this.dx = Math.cos(this.angle) * speed;
@@ -33,17 +33,15 @@ export class Projectile {
     update() { this.x += this.dx; this.y += this.dy; this.life--; if (this.life <= 0) this.active = false; }
     draw(ctx, camX, camY) {
         if (this.type === 'spear') {
-            // Draw elongated projectile rotated to flight path
             ctx.save();
             ctx.translate(this.x - camX, this.y - camY);
             ctx.rotate(this.angle);
             ctx.fillStyle = this.color;
-            ctx.fillRect(-10, -2, 20, 4); // The shaft
-            ctx.fillStyle = '#fff'; // Tip
+            ctx.fillRect(-10, -2, 20, 4); 
+            ctx.fillStyle = '#fff'; 
             ctx.fillRect(10, -2, 4, 4); 
             ctx.restore();
         } else {
-            // Draw standard stone/ball
             ctx.fillStyle = this.color;
             ctx.beginPath();
             ctx.arc(this.x - camX, this.y - camY, 4, 0, Math.PI * 2);
@@ -61,7 +59,6 @@ export class Entity {
         this.damageBuffer = 0;
         this.inventory = { [TILES.GREY.id]: 50, [TILES.BLACK.id]: 20, [TILES.GOLD.id]: 20, [TILES.IRON.id]: 50, [TILES.WOOD.id]: 20, [TILES.GREENS.id]: 0, [TILES.WOOL.id]: 0 };
         
-        // CHANGED: Default is now null (None selected)
         this.selectedTile = null; 
         
         this.direction = { x: 0, y: 1 };
@@ -70,9 +67,16 @@ export class Entity {
         this.inBoat = false; 
         this.equippedWeapon = null; 
         
-        // Active Weapons State (ID or 'hand')
         this.activeRange = TILES.GREY.id; 
         this.activeMelee = 'hand';   
+
+        // AI State for NPCs (Chase -> Charge -> Rest)
+        this.aiState = { 
+            mode: 'chase', // 'chase', 'charge', 'rest'
+            tx: 0, 
+            ty: 0, 
+            timer: 0 
+        };
     }
     
     move(dx, dy, world) {

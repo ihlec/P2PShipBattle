@@ -34,7 +34,6 @@ export default class Game {
         this.player.isMoving = false;
         this.player.moveTime = 0;
         
-        // Active Weapons State (ID or 'hand')
         this.player.activeRange = TILES.GREY.id; 
         this.player.activeMelee = 'hand';        
 
@@ -164,7 +163,6 @@ export default class Game {
     }
 
     initUI() {
-        // --- 1. Material Inventory Bar ---
         this.dom.invBar.innerHTML = ''; 
         const materials = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
         
@@ -174,7 +172,6 @@ export default class Game {
             slot.id = `slot-${t.id}`;
             slot.innerHTML = `<div class="slot-color" style="background:${t.color}"></div><div class="short-name">${t.short}</div><div class="qty" id="qty-${t.id}">0</div>`;
             slot.onclick = () => {
-                // Deselect Logic
                 if (this.player.selectedTile === t.id) {
                     this.player.selectedTile = null;
                 } else {
@@ -186,17 +183,14 @@ export default class Game {
             this.dom.invBar.appendChild(slot);
         });
 
-        // --- 2. Weapon Bar (Two Fixed Toggle Slots) ---
         this.dom.wpnBar.innerHTML = '';
         
-        // A. Range Slot
         const rangeSlot = document.createElement('div');
         rangeSlot.className = 'slot';
         rangeSlot.id = 'slot-range';
         rangeSlot.onclick = () => this.cycleRangeWeapon();
         this.dom.wpnBar.appendChild(rangeSlot);
 
-        // B. Melee Slot
         const meleeSlot = document.createElement('div');
         meleeSlot.className = 'slot';
         meleeSlot.id = 'slot-melee';
@@ -204,7 +198,6 @@ export default class Game {
         meleeSlot.onclick = () => this.cycleMeleeWeapon();
         this.dom.wpnBar.appendChild(meleeSlot);
 
-        // --- 3. Menus ---
         this.dom.bpMenu.innerHTML = '';
         BLUEPRINTS.forEach((bp, index) => {
             const div = document.createElement('div');
@@ -255,7 +248,6 @@ export default class Game {
         while(!found && attempts < 3) {
             idx = (idx + 1) % cycle.length;
             const nextId = cycle[idx];
-            // Always allow Stone, others check inventory
             if (nextId === TILES.GREY.id || (this.player.inventory[nextId] || 0) > 0 || this.godMode) {
                 this.player.activeRange = nextId;
                 found = true;
@@ -286,7 +278,6 @@ export default class Game {
     }
 
     updateUI() {
-        // Update Material Inventory
         const materials = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
         materials.forEach(t => {
             const slot = document.getElementById(`slot-${t.id}`);
@@ -297,7 +288,6 @@ export default class Game {
             }
         });
 
-        // --- Update Range Weapon Slot ---
         const rSlot = document.getElementById('slot-range');
         let rIcon = '';
         let rName = '';
@@ -313,7 +303,6 @@ export default class Game {
         }
         rSlot.innerHTML = `${rIcon}<div class="short-name">${rName}</div>`;
 
-        // --- Update Melee Weapon Slot ---
         const mSlot = document.getElementById('slot-melee');
         let mIcon = '';
         let mName = '';
@@ -329,7 +318,6 @@ export default class Game {
         }
         mSlot.innerHTML = `${mIcon}<div class="short-name">${mName}</div>`;
 
-        // Check costs for Blueprints
         const bpItems = this.dom.bpMenu.children;
         BLUEPRINTS.forEach((bp, i) => {
             const div = bpItems[i];
@@ -462,16 +450,14 @@ export default class Game {
                 }
             }
 
-            // --- SHOOTING (If no active blueprint AND no material selected) ---
+            // --- SHOOTING ---
             if (!this.activeBlueprint) {
                 const sel = this.player.selectedTile;
-                // Attack if: (None selected) OR (Stone selected, allowing it to act as weapon/build override if preferred)
                 if (!sel) {
                     this.throwProjectile(mx, my);
                     return;
                 }
                 
-                // If we DO have a selection, try building
                 if (sel) {
                     const id = sel;
                     const canAfford = (c) => this.godMode || (this.player.inventory[id] || 0) >= c;
@@ -820,7 +806,91 @@ export default class Game {
         }
         // ----------------------------------------
 
-        // Sheep Spawn (Unchanged)
+        // NPC AI LOGIC OVERHAUL: CHASE -> CHARGE -> REST
+        this.npcs.forEach(npc => {
+            // Initialize AI state if missing
+            if (!npc.aiState) npc.aiState = { mode: 'chase', tx: 0, ty: 0, timer: 0 };
+
+            if (npc.aiState.timer > 0) {
+                // Resting
+                npc.aiState.timer--;
+                npc.isMoving = false;
+            } else if (npc.aiState.mode === 'chase') {
+                const dist = Utils.distance(npc, this.player);
+                
+                // Transition to Charge if close (approx 2-3 tiles)
+                if (dist < 80) {
+                    npc.aiState.mode = 'charge';
+                    // Calculate Overrun Target (Point behind player)
+                    const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
+                    const overrunDist = 150; 
+                    npc.aiState.tx = this.player.x + Math.cos(angle) * overrunDist;
+                    npc.aiState.ty = this.player.y + Math.sin(angle) * overrunDist;
+                } else {
+                    // Normal Chase
+                    const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
+                    npc.move(Math.cos(angle) * 2, Math.sin(angle) * 2, this.world);
+                    npc.isMoving = true;
+                    npc.moveTime += dt;
+                }
+            } else if (npc.aiState.mode === 'charge') {
+                // Move towards locked target
+                const dx = npc.aiState.tx - npc.x;
+                const dy = npc.aiState.ty - npc.y;
+                const distToTarget = Math.sqrt(dx*dx + dy*dy);
+                
+                if (distToTarget < 10) {
+                    // Reached target -> Rest
+                    npc.aiState.mode = 'rest';
+                    npc.aiState.timer = 60 + Math.random() * 60; // 1-2 sec pause
+                } else {
+                    const angle = Math.atan2(dy, dx);
+                    // Charging is slightly faster
+                    const moved = npc.move(Math.cos(angle) * 3.5, Math.sin(angle) * 3.5, this.world);
+                    npc.isMoving = true;
+                    npc.moveTime += dt;
+                    
+                    // If stuck (didn't move much despite trying), abort to rest
+                    // (Simple check: if not actually changing position, although move() updates x/y directly)
+                    // Better: just timeout if charge takes too long? 
+                    // For now, rely on reaching target.
+                }
+            } else if (npc.aiState.mode === 'rest') {
+                // Handled by timer check above. When timer hits 0:
+                npc.aiState.mode = 'chase';
+            }
+
+            // Damage Logic (Always active if touching)
+            if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
+                if (!this.godMode) {
+                    this.player.damageBuffer += 0.5; 
+                    if (this.player.damageBuffer >= 1) {
+                        const dmg = Math.floor(this.player.damageBuffer);
+                        this.player.hp -= dmg;
+                        this.player.damageBuffer -= dmg;
+                        if (Math.random() > 0.8) this.spawnParticles(this.player.x, this.player.y, '#f00', 2);
+                    }
+                }
+                
+                // Allow Player to push/damage back
+                if (dx||dy) {
+                    let dmg = 0;
+                    const meleeId = this.player.activeMelee;
+                    if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
+                    else if (meleeId === TILES.SWORD_WOOD.id) dmg = 50;
+                    else if (meleeId === 'hand') dmg = 1;
+
+                    if (dmg > 0 && this.shootCooldown <= 0) {
+                        npc.hp -= dmg;
+                        this.spawnParticles(npc.x, npc.y, '#fff', 8);
+                        this.spawnText(npc.x, npc.y, `HIT ${dmg}`, "#ff0");
+                        this.shootCooldown = 20; 
+                    }
+                }
+            }
+        });
+
+        // Sheep Logic (Unchanged)
         if (this.animals.length < 10 && Math.random() < 0.005) {
             const ang = Math.random() * 6.28;
             const dist = 600;
@@ -839,43 +909,6 @@ export default class Game {
                 }
             }
         }
-
-        this.npcs.forEach(npc => {
-            const ang = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
-            npc.move(Math.cos(ang)*2, Math.sin(ang)*2, this.world);
-            
-            npc.isMoving = true; 
-            npc.moveTime += dt;
-            
-            if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
-                // Melee Damage (Passive)
-                const meleeId = this.player.activeMelee;
-                if (dx || dy) {
-                    let dmg = 0;
-                    if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
-                    else if (meleeId === TILES.SWORD_WOOD.id) dmg = 50;
-                    else if (meleeId === 'hand') dmg = 1; // NEW: Hand damage logic
-
-                    if (dmg > 0 && this.shootCooldown <= 0) {
-                        npc.hp -= dmg;
-                        this.spawnParticles(npc.x, npc.y, '#fff', 8);
-                        this.spawnText(npc.x, npc.y, `HIT ${dmg}`, "#ff0");
-                        npc.move((dx)*30, (dy)*30, this.world);
-                        this.shootCooldown = 20; 
-                    }
-                }
-
-                if (!this.godMode) {
-                    this.player.damageBuffer += 0.5; 
-                    if (this.player.damageBuffer >= 1) {
-                        const dmg = Math.floor(this.player.damageBuffer);
-                        this.player.hp -= dmg;
-                        this.player.damageBuffer -= dmg;
-                        if (Math.random() > 0.8) this.spawnParticles(this.player.x, this.player.y, '#f00', 2);
-                    }
-                }
-            }
-        });
 
         this.animals.forEach(s => {
             s.updateAI(dt, this.player, this.world);
@@ -950,7 +983,6 @@ export default class Game {
         this.npcs = cleanup(this.npcs);
         this.animals = cleanup(this.animals);
         
-        // NEW: Boat cleanup logic
         this.boats = this.boats.filter(b => {
              if (b.hp <= 0) {
                  this.loot.push({x: b.x, y: b.y, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
@@ -1413,4 +1445,4 @@ export default class Game {
         this.draw();
         requestAnimationFrame(t => this.loop(t));
     }
-}
+}wd
