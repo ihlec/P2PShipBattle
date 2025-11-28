@@ -16,6 +16,32 @@ export class Particle {
     }
 }
 
+export class WakeParticle {
+    constructor(x, y, angle) {
+        this.x = x; 
+        this.y = y;
+        this.life = 60 + Math.random() * 40;
+        this.maxLife = this.life;
+        this.size = Math.random() * 10 + 5;
+        this.dx = Math.cos(angle) * 0.5;
+        this.dy = Math.sin(angle) * 0.5;
+    }
+    update() {
+        this.x += this.dx;
+        this.y += this.dy;
+        this.size += 0.2; 
+        this.life--;
+    }
+    draw(ctx, camX, camY) {
+        ctx.globalAlpha = (this.life / this.maxLife) * 0.4;
+        ctx.fillStyle = '#aaddff';
+        ctx.beginPath();
+        ctx.arc(this.x - camX, this.y - camY, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+    }
+}
+
 export class WindParticle {
     constructor(screenWidth, screenHeight) {
         this.x = Math.random() * screenWidth;
@@ -142,7 +168,8 @@ export class Entity {
 
         let fireAngle = stats.heading + (side === 'right' ? Math.PI/2 : -Math.PI/2);
         
-        const offsets = [-10, 0, 10]; 
+        // [FIX] 2 Shots to match visual cannons (Front Deck and Rear Deck)
+        const offsets = [10, -22]; 
         offsets.forEach(off => {
             const spawnX = this.x + Math.cos(stats.heading) * off;
             const spawnY = this.y + Math.sin(stats.heading) * off;
@@ -173,16 +200,14 @@ export class Entity {
         if (side === 'right') stats.cooldownRight = cd;
     }
 
-    // [MODIFIED] Removed Low-Speed Steering Threshold
-    updateBoatMovement(input, dt, world) {
+    updateBoatMovement(input, dt, world, game) {
         const stats = this.boatStats;
         const cfg = CONFIG.BOAT;
 
         if (stats.cooldownLeft > 0) stats.cooldownLeft--;
         if (stats.cooldownRight > 0) stats.cooldownRight--;
 
-        // 1. RUDDER PHYSICS
-        // Removed currentSpeed threshold. Steer efficiency is always 100%
+        // RUDDER
         if (input.left) stats.rudder -= cfg.RUDDER_SPEED;
         if (input.right) stats.rudder += cfg.RUDDER_SPEED;
 
@@ -192,11 +217,10 @@ export class Entity {
         if (!input.left && !input.right) stats.rudder *= 0.95;
 
         if (Math.abs(stats.rudder) > 0.001) {
-            // Maintained the reduced turn rate (0.25) for heavy feel
             stats.heading += stats.rudder * (cfg.TURN_FACTOR * 0.25);
         }
 
-        // 2. WIND & SAIL PHYSICS (POLAR DIAGRAM)
+        // WIND & SAILS
         const windDot = Math.cos(world.wind.angle - stats.heading);
         let windEfficiency = 0;
         
@@ -226,7 +250,7 @@ export class Entity {
         this.velocity.x += accX;
         this.velocity.y += accY;
 
-        // 3. DRAG & KEEL
+        // DRAG
         this.velocity.x *= 0.995; 
         this.velocity.y *= 0.995;
 
@@ -245,12 +269,24 @@ export class Entity {
             this.velocity.y = Math.sin(stats.heading) * newForward + Math.sin(stats.heading + Math.PI/2) * newLateral;
         }
 
-        // 4. MOVE
+        // MOVE
         const pixelScale = 15; 
         this.move(this.velocity.x * pixelScale, this.velocity.y * pixelScale, world);
         
         stats.speed = Math.sqrt(this.velocity.x**2 + this.velocity.y**2) * pixelScale;
         this.isMoving = stats.speed > 0.1;
+
+        // Wake Effects
+        if (game && stats.speed > 0.5 && Math.random() < 0.3) {
+            const sternX = this.x - Math.cos(stats.heading) * 40;
+            const sternY = this.y - Math.sin(stats.heading) * 40;
+            
+            const w1 = new WakeParticle(sternX, sternY, stats.heading + Math.PI + 0.2);
+            const w2 = new WakeParticle(sternX, sternY, stats.heading + Math.PI - 0.2);
+            
+            if (!game.particles) game.particles = [];
+            game.particles.push(w1, w2);
+        }
     }
 
     move(dx, dy, world) {
@@ -409,7 +445,7 @@ export class Boat extends Entity {
             if (Math.abs(diff) < 1.0 && dist > 100) input.up = true;
             else if (dist < 100) input.down = true; 
 
-            this.updateBoatMovement(input, dt, world);
+            this.updateBoatMovement(input, dt, world, game);
 
             const angleToTarget = Math.atan2(player.y - this.y, player.x - this.x);
             let angleRelative = angleToTarget - heading;

@@ -1,5 +1,4 @@
-
-import { CONFIG, TILES, ID_TO_TILE } from './config.js';
+import { CONFIG, TILES, ID_TO_TILE, SHIP_LAYOUT } from './config.js';
 import Utils from './utils.js';
 
 export default class Renderer {
@@ -8,7 +7,6 @@ export default class Renderer {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         
-        // Shadow Canvas for Lighting (Offscreen)
         this.shadowCanvas = document.createElement('canvas');
         this.shadowCtx = this.shadowCanvas.getContext('2d');
         
@@ -22,7 +20,6 @@ export default class Renderer {
         this.shadowCanvas.height = this.canvas.height;
     }
 
-    // Main Draw Call
     draw() {
         this.ctx.fillStyle = '#1a1a1a';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -92,7 +89,6 @@ export default class Renderer {
                 const tx = c * CONFIG.TILE_SIZE;
                 const ty = r * CONFIG.TILE_SIZE;
 
-                // Draw Generic Solid Blocks (excluding special types)
                 if (tile.solid && !tile.isWater && id !== TILES.TREE.id && id !== TILES.MOUNTAIN.id && id !== TILES.STONE_BLOCK.id && !tile.isTower) {
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
@@ -107,7 +103,7 @@ export default class Renderer {
                     this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
                 
-                // Draw Boulders (Procedural)
+                // [FIXED] Restored Stone Block Details
                 if (id === TILES.STONE_BLOCK.id) {
                     this.ctx.fillStyle = TILES.GRASS.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
@@ -118,16 +114,29 @@ export default class Renderer {
                         this.ctx.fillRect(tx + 4, ty + 4, 24, 24);
                         this.ctx.fillRect(tx + 2, ty + 8, 4, 16); 
                         this.ctx.fillRect(tx + 26, ty + 8, 4, 16);
+                        this.ctx.fillRect(tx + 8, ty + 2, 16, 4); 
+                        this.ctx.fillRect(tx + 8, ty + 26, 16, 4); 
+                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                        this.ctx.fillRect(tx + 8, ty + 6, 8, 4);
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                        this.ctx.fillRect(tx + 8, ty + 22, 16, 6);
                     } else if (shapeR < 0.66) {
                         this.ctx.fillRect(tx + 2, ty + 12, 28, 18);
                         this.ctx.fillRect(tx + 6, ty + 8, 20, 4);
+                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                        this.ctx.fillRect(tx + 6, ty + 8, 20, 2);
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                        this.ctx.fillRect(tx + 22, ty + 12, 8, 18);
                     } else {
                         this.ctx.fillRect(tx + 2, ty + 14, 12, 14); 
                         this.ctx.fillRect(tx + 12, ty + 6, 18, 22); 
+                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                        this.ctx.fillRect(tx + 14, ty + 6, 10, 4);
+                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                        this.ctx.fillRect(tx + 8, ty + 20, 6, 8);
                     }
                 }
 
-                // Draw HP Bars on damaged tiles
                 if (tile.hp) {
                     const dmg = this.game.world.getTileDamage(c, r);
                     if (dmg > 0) {
@@ -141,7 +150,6 @@ export default class Renderer {
                     }
                 }
 
-                // Draw Mountains
                 if (id === TILES.MOUNTAIN.id) {
                     this.ctx.fillStyle = Utils.hsl(0, 0, 60, c, r, this.game.world.seed, 0, 15);
                     this.ctx.fillRect(tx, ty - 8, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE + 8); 
@@ -151,7 +159,6 @@ export default class Renderer {
                     this.ctx.fillRect(tx + 4, ty - 8, CONFIG.TILE_SIZE - 8, 8);
                 }
 
-                // Draw Trees with Occlusion
                 if (id === TILES.TREE.id) {
                     let isOccluding = false;
                     for (let checkR = r - 2; checkR < r; checkR++) {
@@ -165,17 +172,22 @@ export default class Renderer {
                     const shapeR = Utils.noise(c, r, this.game.world.seed + 555);
                     if (shapeR < 0.33) {
                         this.ctx.fillRect(tx, ty - 24, 32, 24);
+                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+                        this.ctx.fillRect(tx + 4, ty - 20, 24, 16);
                     } else if (shapeR < 0.66) {
                         this.ctx.fillRect(tx + 2, ty - 16, 28, 16); 
                         this.ctx.fillRect(tx + 6, ty - 30, 20, 14); 
+                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+                        this.ctx.fillRect(tx + 8, ty - 26, 16, 22);
                     } else {
                         this.ctx.fillRect(tx - 2, ty - 20, 36, 20); 
                         this.ctx.fillRect(tx + 6, ty - 26, 20, 6); 
+                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+                        this.ctx.fillRect(tx + 4, ty - 16, 24, 12);
                     }
                     this.ctx.globalAlpha = 1.0;
                 }
 
-                // Draw Torch
                 if (id === TILES.TORCH.id) {
                     this.ctx.fillStyle = '#555';
                     this.ctx.fillRect(tx + 14, ty + 10, 4, 12); 
@@ -184,7 +196,6 @@ export default class Renderer {
                     this.ctx.fillRect(tx + 12 - flicker, ty + 6 - flicker, 8 + flicker*2, 8 + flicker*2); 
                 }
 
-                // Draw Towers
                 if (tile.isTower) {
                     let isOccluding = false;
                     for (let checkR = r - 2; checkR < r; checkR++) {
@@ -195,12 +206,10 @@ export default class Renderer {
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                     this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
 
-                    // Top part
                     this.ctx.fillStyle = (id === TILES.TOWER_BASE_IRON.id ? '#444' : id === TILES.TOWER_BASE_GOLD.id ? '#ffd700' : '#777');
                     this.ctx.fillRect(tx, ty - CONFIG.TILE_SIZE, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                     this.ctx.strokeRect(tx, ty - CONFIG.TILE_SIZE, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                     
-                    // Roof
                     this.ctx.fillStyle = '#5C3317';
                     this.ctx.beginPath();
                     this.ctx.moveTo(tx, ty - CONFIG.TILE_SIZE);
@@ -220,11 +229,10 @@ export default class Renderer {
                 }
             }
 
-            // Draw Entities in this row
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'boat') {
-                        this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp);
+                        this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
                     } else if (obj._type === 'loot') {
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
                         this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
@@ -232,13 +240,12 @@ export default class Renderer {
                     } else if (obj._type === 'sheep') {
                         this.drawSheep(obj._orig);
                     } else {
-                        // Player/NPC
                         const isPlayer = obj._type === 'player';
                         if (isPlayer && obj._orig.inBoat) {
-                            this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, isPlayer ? 'player' : 'enemy', obj._orig.hp, obj._orig.maxHp);
+                            this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, isPlayer ? 'player' : 'enemy', obj._orig.hp, obj._orig.maxHp, obj._orig);
                             this.ctx.save();
                             this.ctx.translate(obj.x, obj.y);
-                            this.ctx.rotate(obj._orig.boatStats.heading);
+                            this.ctx.rotate(obj._orig.boatStats.heading + Math.PI/2); 
                             this.ctx.fillStyle = isPlayer ? '#3498db' : '#993333';
                             this.ctx.fillRect(-4, -4, 8, 8); 
                             this.ctx.restore();
@@ -250,16 +257,14 @@ export default class Renderer {
             }
         }
 
-        // Draw Projectiles
         this.ctx.fillStyle = '#fff';
         this.game.projectiles.forEach(p => {
             if(p.draw) p.draw(this.ctx, 0, 0); 
         });
 
-        // Draw Particles
-        this.game.particles.forEach(p => p.draw(this.ctx, 0, 0)); 
+        // Draw Particles (including Wake)
+        this.game.particles.forEach(p => p.draw(this.ctx, this.game.camera.x, this.game.camera.y)); 
 
-        // Draw Blueprint Preview
         if (this.game.activeBlueprint) {
             const mx = (this.game.input.mouse.x / this.game.zoom) + this.game.camera.x;
             const my = (this.game.input.mouse.y / this.game.zoom) + this.game.camera.y;
@@ -282,13 +287,10 @@ export default class Renderer {
         
         this.ctx.restore(); 
 
-        // Post-Processing / UI Overlays
         this.renderLighting();
 
-        // Wind Particles (Screen space)
         this.game.windParticles.forEach(p => p.draw(this.ctx, this.game.world.wind.angle));
 
-        // Floating Text
         this.ctx.font = "bold 14px monospace";
         this.ctx.save();
         this.ctx.scale(this.game.zoom, this.game.zoom);
@@ -308,41 +310,139 @@ export default class Renderer {
         this.ctx.fillStyle = '#0f0'; this.ctx.fillRect(x, y, w * (Math.max(0,e.hp)/e.maxHp), h);
     }
 
-    drawBoat(x, y, heading, owner, hp, maxHp) {
+    drawBoat(x, y, heading, owner, hp, maxHp, boatData) {
         this.ctx.save();
         this.ctx.translate(x, y);
-        this.ctx.rotate(heading);
+        this.ctx.rotate(heading + Math.PI / 2);
         
-        const w = 48; const h = 24; 
-        this.ctx.fillStyle = '#8B4513';
-        this.ctx.fillRect(-w/2, -h/2, w, h);
+        const rows = SHIP_LAYOUT.length;
+        const cols = SHIP_LAYOUT[0].length;
+        const ts = 16; 
         
-        this.ctx.fillStyle = '#5C3317';
-        this.ctx.fillRect(-w/3, -h/3, w*0.6, h*0.6); 
-        
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(-10, -h/2 - 2, 4, 4);
-        this.ctx.fillRect(6, -h/2 - 2, 4, 4);
-        this.ctx.fillRect(-10, h/2 - 2, 4, 4);
-        this.ctx.fillRect(6, h/2 - 2, 4, 4);
+        const startX = -(cols * ts) / 2;
+        const startY = -(rows * ts) / 2;
 
-        this.ctx.fillStyle = '#333';
-        this.ctx.fillRect(4, -8, 8, 8); 
-
-        this.ctx.fillStyle = owner === 'enemy' ? '#000' : '#fff'; 
+        this.ctx.fillStyle = '#3E2723';
         this.ctx.beginPath();
-        this.ctx.moveTo(8, -32);
-        this.ctx.lineTo(32, 0); 
-        this.ctx.lineTo(8, 8);
+        this.ctx.moveTo(0, startY);
+        this.ctx.lineTo(startX + cols*ts, startY + ts);
+        this.ctx.lineTo(startX + cols*ts, startY + rows*ts);
+        this.ctx.lineTo(startX, startY + rows*ts);
+        this.ctx.lineTo(startX, startY + ts);
+        this.ctx.closePath();
         this.ctx.fill();
-        this.ctx.restore();
-        
-        const barW = 24, barH = 4;
-        const bx = x - barW/2, by = y - 40;
-        if (hp < maxHp) {
-            this.ctx.fillStyle = '#300'; this.ctx.fillRect(bx, by, barW, barH);
-            this.ctx.fillStyle = '#0f0'; this.ctx.fillRect(bx, by, barW * (Math.max(0,hp)/maxHp), barH);
+
+        let mastX = 0;
+        let mastY = 0;
+        let hasMast = false;
+
+        for(let r=0; r<rows; r++) {
+            for(let c=0; c<cols; c++) {
+                const type = SHIP_LAYOUT[r][c];
+                const dx = startX + c*ts;
+                const dy = startY + r*ts;
+                
+                if (type !== 0 && type !== 44) {
+                    this.ctx.fillStyle = TILES.SHIP_DECK.color;
+                    this.ctx.fillRect(dx, dy, ts, ts);
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                    this.ctx.fillRect(dx, dy+4, ts, 1);
+                    this.ctx.fillRect(dx, dy+8, ts, 1);
+                    this.ctx.fillRect(dx, dy+12, ts, 1);
+                }
+
+                if (type === 44) { // BOW
+                    this.ctx.fillStyle = TILES.SHIP_DECK.color;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(dx + ts/2, dy);
+                    this.ctx.lineTo(dx + ts, dy + ts);
+                    this.ctx.lineTo(dx, dy + ts);
+                    this.ctx.closePath();
+                    this.ctx.fill();
+                    
+                    this.ctx.strokeStyle = '#5C3317';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(dx + ts/2, dy + ts);
+                    this.ctx.lineTo(dx + ts/2, dy - 15);
+                    this.ctx.stroke();
+                    
+                    if (boatData && boatData.isMoving && Math.random() < 0.3) {
+                       this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                       this.ctx.beginPath();
+                       this.ctx.arc(dx+ts/2, dy - 10, Math.random()*5+2, 0, Math.PI*2);
+                       this.ctx.fill();
+                    }
+                } 
+                else if (type === 41) { 
+                    this.ctx.fillStyle = TILES.SHIP_RAIL.color;
+                    if (c === 0) this.ctx.fillRect(dx, dy, 4, ts); 
+                    if (c === 2) this.ctx.fillRect(dx+ts-4, dy, 4, ts); 
+                } 
+                else if (type === 45) { 
+                    this.ctx.fillStyle = '#4E342E';
+                    this.ctx.fillRect(dx, dy, ts, ts);
+                    if (r === rows-1) {
+                        this.ctx.fillStyle = '#FFD700';
+                        this.ctx.fillRect(dx + 4, dy + ts - 4, ts - 8, 2);
+                    }
+                }
+                else if (type === 42) { 
+                    this.ctx.fillStyle = TILES.SHIP_MAST.color;
+                    this.ctx.beginPath();
+                    this.ctx.arc(dx + ts/2, dy + ts/2, 5, 0, Math.PI*2);
+                    this.ctx.fill();
+                    mastX = dx + ts/2;
+                    mastY = dy + ts/2;
+                    hasMast = true;
+                } 
+                else if (type === 43) { 
+                    this.ctx.fillStyle = '#000';
+                    this.ctx.beginPath();
+                    this.ctx.arc(dx + ts/2, dy + ts/2, 4, 0, Math.PI*2);
+                    this.ctx.fill();
+                    if (c === 0) this.ctx.fillRect(dx - 2, dy + ts/2 - 2, 8, 4); 
+                    else this.ctx.fillRect(dx + 8, dy + ts/2 - 2, 8, 4); 
+                }
+            }
         }
+
+        if (hasMast) {
+            this.ctx.save();
+            this.ctx.translate(mastX, mastY);
+            
+            // [FIXED] Dynamic Sail Logic
+            let windAngle = this.game.world.wind.angle;
+            let diff = windAngle - heading;
+            // Normalize to -PI...PI
+            diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+            
+            // Allow swinging +/- 1.0 radian (approx 60 deg) to catch wind
+            let sailRot = Math.max(-1.0, Math.min(1.0, diff));
+            
+            this.ctx.rotate(sailRot);
+
+            this.ctx.fillStyle = '#5D4037';
+            this.ctx.fillRect(-32, -2, 64, 4);
+
+            this.ctx.fillStyle = owner === 'enemy' ? '#111' : '#eee'; 
+            this.ctx.beginPath();
+            
+            // [FIXED] Concavity: Billow Forward (Negative Y in local space)
+            // Local Space: -Y is Forward (Bow), +Y is Aft (Stern)
+            // Wind pushing from back to front.
+            // Curve control point is (0, -25) to billow forward.
+            this.ctx.moveTo(-30, 0); 
+            this.ctx.quadraticCurveTo(0, -25, 30, 0); // Negative Y = Billows "Forward" (Up on screen)
+            this.ctx.lineTo(30, 2);
+            this.ctx.quadraticCurveTo(0, -23, -30, 2);
+            this.ctx.fill();
+            
+            this.ctx.restore();
+        }
+
+        this.ctx.restore();
+        this.drawHealth({x, y, hp, maxHp});
     }
 
     drawSheep(obj) {
@@ -423,7 +523,7 @@ export default class Renderer {
         this.ctx.fillRect(obj.x - (HEAD_SIZE/2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6); 
 
         const heldId = this.game.player.activeMelee;
-        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id) && isPlayer) { // Only player shows held item for now
+        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id) && isPlayer) { 
             this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317'; 
             this.ctx.lineWidth = 3;
             const handX = obj.x + 10; 

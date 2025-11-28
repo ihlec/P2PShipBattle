@@ -11,7 +11,7 @@ export const CONFIG = {
     
     DAY_CYCLE: {
         DURATION: 24000, 
-        NIGHT_OPACITY: 0.95, // Darker night
+        NIGHT_OPACITY: 0.95, 
         SUNRISE: 0.25,
         SUNSET: 0.75
     },
@@ -61,7 +61,6 @@ export const TILES = {
     WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
     STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Boulder', short: 'Bld', hp: 80 }, 
     
-    // [MODIFIED] Added isTower, light, and cannonDamage to allow generic checks
     TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St', hp: 150, isTower: true, light: 150, cannonDamage: 20 },
     TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir', hp: 300, isTower: true, light: 150, cannonDamage: 40 },
     TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd', hp: 500, isTower: true, light: 150, cannonDamage: 80 },
@@ -79,15 +78,33 @@ export const TILES = {
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' },
     BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' },
     
-    // [MODIFIED] Added light property
     TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10, light: 200 },
 
-    // WEAPONS AS ITEMS
     SPEAR_WOOD: { id: 30, color: '#5C3317', solid: false, name: 'Wd.Spear', short: 'W.Spr' },
     SPEAR_IRON: { id: 31, color: '#aaa', solid: false, name: 'Ir.Spear', short: 'I.Spr' },
     SWORD_WOOD: { id: 32, color: '#5C3317', solid: false, name: 'Wd.Sword', short: 'W.Swd' },
-    SWORD_IRON: { id: 33, color: '#ccc', solid: false, name: 'Ir.Sword', short: 'I.Swd' }
+    SWORD_IRON: { id: 33, color: '#ccc', solid: false, name: 'Ir.Sword', short: 'I.Swd' },
+
+    // [NEW] Ship Aesthetics
+    SHIP_DECK: { id: 40, color: '#8B5A2B', solid: false, name: 'Deck' },
+    SHIP_RAIL: { id: 41, color: '#5C3317', solid: true, name: 'Rail' },
+    SHIP_MAST: { id: 42, color: '#3E2723', solid: true, name: 'Mast' },
+    SHIP_CANNON: { id: 43, color: '#111', solid: true, name: 'Cannon' },
+    SHIP_BOW: { id: 44, color: '#8B5A2B', solid: true, name: 'Bow' },
+    SHIP_STERN: { id: 45, color: '#5C3317', solid: true, name: 'Stern' }
 };
+
+// [MODIFIED] More detailed ship layout (0 = Empty, but processed relative to boat center)
+// 3 columns x 6 rows
+// Grid is relative to center.
+export const SHIP_LAYOUT = [
+    [0, 44, 0], // Bow (Pointy)
+    [41, 40, 41], // Front Deck (Rails on side)
+    [43, 42, 43], // Main Mast + Cannons
+    [41, 40, 41], // Mid Deck
+    [43, 40, 43], // Rear Cannons
+    [45, 45, 45]  // Stern (Poop Deck / Captains Quarters)
+];
 
 export const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
 
