@@ -330,6 +330,19 @@ export class Entity {
             this.velocity.y *= -0.5; // Bounce
         }
 
+        // --- EMERGENCY UNSTUCK ---
+        // If we are currently inside a solid block (e.g. after building/spawning), push us out
+        const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
+        const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
+        if (world.isSolid(gx, gy) && !this.inBoat && this.type !== 'boat') {
+             // Push slightly towards the direction we were trying to go, or random if 0
+             const pushX = dx !== 0 ? Math.sign(dx) : (Math.random()-0.5);
+             const pushY = dy !== 0 ? Math.sign(dy) : (Math.random()-0.5);
+             this.x += pushX * 2;
+             this.y += pushY * 2;
+        }
+        // -------------------------
+
         if (dx !== 0 || dy !== 0) {
             this.direction = { x: dx, y: dy };
             this.isMoving = true;
@@ -338,8 +351,6 @@ export class Entity {
             this.isMoving = false;
         }
 
-        const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
-        const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
         const currentTile = world.getTile(gx, gy);
 
         if (this.inBoat) {
@@ -400,7 +411,6 @@ export class Boat extends Entity {
         this.travelTimer = (this.owner === 'enemy') ? 1800 + Math.random() * 16200 : 0;
     }
 
-    // [MODIFIED] Advanced Naval AI (Tacking & Broadsides)
     updateAI(dt, player, world, game) {
         if (this.owner !== 'enemy') return;
 
@@ -420,39 +430,30 @@ export class Boat extends Entity {
 
             let desiredAngle = angleToPlayer;
 
-            // --- 1. STATE MACHINE ---
-            // If very close, try to ORBIT (Broadside). If far, CHASE.
             const BROADSIDE_RANGE = 300;
             const MIN_RANGE = 150;
 
             if (dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
-                // ORBIT: Turn perpendicular to player
-                // Check which side is closer to firing solution
                 let relative = angleToPlayer - heading;
                 while (relative > Math.PI) relative -= Math.PI * 2;
                 while (relative < -Math.PI) relative += Math.PI * 2;
 
-                if (relative > 0) desiredAngle = angleToPlayer - Math.PI/2; // Keep player on right
-                else desiredAngle = angleToPlayer + Math.PI/2; // Keep player on left
+                if (relative > 0) desiredAngle = angleToPlayer - Math.PI/2; 
+                else desiredAngle = angleToPlayer + Math.PI/2; 
             }
 
-            // --- 2. WIND AWARENESS & TACKING ---
-            // Check if desired heading is into the wind ("No Go Zone")
             const windDir = world.wind.angle;
             let windDiff = Math.cos(windDir - desiredAngle);
             
-            // If facing wind (cos < -0.5), we must TACK
             if (windDiff < -0.5) {
                 this.aiState.tackTimer++;
-                if (this.aiState.tackTimer > 400) { // Switch tack every ~7 seconds
+                if (this.aiState.tackTimer > 400) { 
                     this.aiState.tackState *= -1;
                     this.aiState.tackTimer = 0;
                 }
-                // Target 45 degrees off the wind
                 desiredAngle = windDir + (Math.PI * 0.75 * this.aiState.tackState);
             }
 
-            // --- 3. STEERING EXECUTION ---
             let diff = desiredAngle - heading;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
@@ -462,21 +463,17 @@ export class Boat extends Entity {
                 else input.left = true;
             }
 
-            // --- 4. THROTTLE CONTROL ---
-            // Slow down if overshoot or tight turn needed
-            if (Math.abs(diff) < 1.0) input.up = true; // Full speed ahead if on course
-            else if (Math.abs(diff) > 2.0) input.down = true; // Brake to turn faster? (Pivot)
-            else input.up = false; // Coast to turn
+            if (Math.abs(diff) < 1.0) input.up = true; 
+            else if (Math.abs(diff) > 2.0) input.down = true; 
+            else input.up = false; 
 
             this.updateBoatMovement(input, dt, world, game);
 
-            // --- 5. FIRING LOGIC ---
-            // Check if we actually have a shot lined up
             let angleRelative = angleToPlayer - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
             while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
 
-            const broadsideThreshold = 0.3; // Approx 17 degrees
+            const broadsideThreshold = 0.3; 
             
             if (Math.abs(angleRelative - (-Math.PI/2)) < broadsideThreshold) {
                 this.shootBroadside(game, 'left');
@@ -486,7 +483,6 @@ export class Boat extends Entity {
             }
 
         } else if (this.isLanded) {
-            // [EXISTING SPAWN LOGIC]
             const minionAlive = this.activeMinion && 
                                 this.activeMinion.hp > 0 && 
                                 game.npcs.includes(this.activeMinion);
@@ -495,25 +491,57 @@ export class Boat extends Entity {
                 this.respawnTimer++;
                 if (this.respawnTimer > this.nextRespawnTime) {
                     const angle = Math.atan2(player.y - this.y, player.x - this.x);
-                    const spawnX = this.x + Math.cos(angle) * 32;
-                    const spawnY = this.y + Math.sin(angle) * 32;
                     
-                    const minion = new Entity(spawnX, spawnY, 'npc');
-                    game.npcs.push(minion);
-                    this.activeMinion = minion;
-                    
-                    game.spawnParticles(this.x, this.y, '#ff0000', 8);
-                    game.spawnText(this.x, this.y, "INVASION!", "#f00"); 
+                    // --- SMART SPAWN LOGIC ---
+                    // Scan for a valid non-solid tile to spawn the minion
+                    let spawnX = this.x;
+                    let spawnY = this.y;
+                    let validSpotFound = false;
 
-                    this.respawnTimer = 0;
-                    
-                    const minFrames = 7200;
-                    const maxFrames = 72000;
-                    this.nextRespawnTime = minFrames + Math.random() * (maxFrames - minFrames);
+                    // Try varying distances and angles
+                    for(let d = 32; d <= 96; d += 16) {
+                        const angles = [0, -0.6, 0.6, -1.2, 1.2]; 
+                        for(let a of angles) {
+                            const checkAngle = angle + a;
+                            const tx = this.x + Math.cos(checkAngle) * d;
+                            const ty = this.y + Math.sin(checkAngle) * d;
+                            
+                            const gx = Math.floor(tx / CONFIG.TILE_SIZE);
+                            const gy = Math.floor(ty / CONFIG.TILE_SIZE);
+                            
+                            if (!world.isSolid(gx, gy)) {
+                                const t = world.getTile(gx, gy);
+                                if (t !== TILES.WATER.id && t !== TILES.DEEP_WATER.id) {
+                                    spawnX = tx;
+                                    spawnY = ty;
+                                    validSpotFound = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (validSpotFound) break;
+                    }
+                    // -------------------------
+
+                    if (validSpotFound) {
+                        const minion = new Entity(spawnX, spawnY, 'npc');
+                        game.npcs.push(minion);
+                        this.activeMinion = minion;
+                        
+                        game.spawnParticles(this.x, this.y, '#ff0000', 8);
+                        game.spawnText(this.x, this.y, "INVASION!", "#f00"); 
+
+                        this.respawnTimer = 0;
+                        const minFrames = 7200;
+                        const maxFrames = 72000;
+                        this.nextRespawnTime = minFrames + Math.random() * (maxFrames - minFrames);
+                    } else {
+                         // Retry sooner if blocked
+                         this.respawnTimer -= 100;
+                    }
                 }
             }
         } else {
-            // Beaching Logic
             const angle = Math.atan2(player.y - this.y, player.x - this.x);
             const prevX = this.x;
             const prevY = this.y;

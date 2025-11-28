@@ -72,12 +72,20 @@ export default class Renderer {
                 }
                 
                 // Draw floor under transparent objects
-                if (id === TILES.WOOD_WALL_OPEN.id || id === TILES.TREE.id || id === TILES.MOUNTAIN.id || id === TILES.TORCH.id) {
+                if (id === TILES.WOOD_WALL_OPEN.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
                      const biome = Utils.getBiome(c, r, this.game.world.seed);
                      const bgTile = ID_TO_TILE[biome];
                      this.ctx.fillStyle = bgTile ? bgTile.color : '#000';
+                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                }
+
+                // Force Grass under trees/mountains/torches
+                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id || id === TILES.TORCH.id) {
+                     const tx = c * CONFIG.TILE_SIZE;
+                     const ty = r * CONFIG.TILE_SIZE;
+                     this.ctx.fillStyle = TILES.GRASS.color; 
                      this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
             }
@@ -127,16 +135,14 @@ export default class Renderer {
                 else if (id === TILES.TREE.id) {
                     this.drawTree(tx, ty, c, r, rowBuckets);
                 }
-                // 8. Mountains
+                // 8. Mountains [UPDATED TO REQUESTED STYLE]
                 else if (id === TILES.MOUNTAIN.id) {
                     this.ctx.fillStyle = Utils.hsl(0, 0, 60, c, r, this.game.world.seed, 0, 15);
                     this.ctx.fillRect(tx, ty - 8, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE + 8); 
-                    this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(tx, ty + CONFIG.TILE_SIZE);
-                    this.ctx.lineTo(tx + CONFIG.TILE_SIZE/2, ty - 8);
-                    this.ctx.lineTo(tx + CONFIG.TILE_SIZE, ty + CONFIG.TILE_SIZE);
-                    this.ctx.fill();
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty - 8, 4, CONFIG.TILE_SIZE + 8);
+                    this.ctx.fillStyle = '#eee'; 
+                    this.ctx.fillRect(tx + 4, ty - 8, CONFIG.TILE_SIZE - 8, 8);
                 }
                 // 9. Torches
                 else if (id === TILES.TORCH.id) {
@@ -182,7 +188,7 @@ export default class Renderer {
                     if (obj._type === 'boat') {
                         this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
                     } else if (obj._type === 'loot') {
-                        // [FIXED] Loot Rendering Logic
+                        // Loot Rendering Logic
                         const gx = Math.floor(obj.x / CONFIG.TILE_SIZE);
                         const gy = Math.floor(obj.y / CONFIG.TILE_SIZE);
                         const tileId = this.game.world.getTile(gx, gy);

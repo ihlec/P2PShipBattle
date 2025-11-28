@@ -14,7 +14,7 @@ export default class Game {
         let validSpawn = null;
         let attempts = 0;
         
-        while (!validSpawn && attempts < 10) {
+        while (!validSpawn && attempts < 20) {
             this.world = new World(); 
             validSpawn = this.findSafeSpawn();
             if (!validSpawn) {
@@ -24,8 +24,14 @@ export default class Game {
         }
         
         if (!validSpawn) {
+            // Emergency fallback
             validSpawn = {x: 0, y: 0};
-            console.warn("Could not find safe spawn after 10 attempts.");
+            // Clear area around 0,0
+            this.world.setTile(0, 0, TILES.GRASS.id);
+            this.world.setTile(1, 0, TILES.GRASS.id);
+            this.world.setTile(0, 1, TILES.GRASS.id);
+            this.world.setTile(1, 1, TILES.GRASS.id);
+            console.warn("Could not find safe spawn. Forcing 0,0.");
         }
 
         this.player = new Entity(validSpawn.x, validSpawn.y, 'player');
@@ -395,8 +401,20 @@ export default class Game {
 
     findSafeSpawn() {
         const isSafe = (gx, gy) => {
-            const t = this.world.getTile(gx, gy);
-            if (t !== TILES.GRASS.id) return false;
+            const tileId = this.world.getTile(gx, gy);
+            const tileDef = ID_TO_TILE[tileId];
+
+            if (tileDef.solid) return false;
+            if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return false;
+
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const nid = this.world.getTile(gx + dx, gy + dy);
+                    const ndef = ID_TO_TILE[nid];
+                    if (ndef.solid || ndef.isWater) return false; 
+                }
+            }
+
             const radius = 8;
             for(let y = -radius; y <= radius; y++) {
                 for(let x = -radius; x <= radius; x++) {
@@ -406,10 +424,19 @@ export default class Game {
             }
             return true;
         };
+
         for (let r = 0; r < 2000; r++) { 
-            const x = (Math.random() - 0.5) * 5000; const y = (Math.random() - 0.5) * 5000;
-            const gx = Math.floor(x/CONFIG.TILE_SIZE); const gy = Math.floor(y/CONFIG.TILE_SIZE);
-            if (isSafe(gx, gy)) return {x, y};
+            const x = (Math.random() - 0.5) * 5000; 
+            const y = (Math.random() - 0.5) * 5000;
+            const gx = Math.floor(x/CONFIG.TILE_SIZE); 
+            const gy = Math.floor(y/CONFIG.TILE_SIZE);
+            
+            if (isSafe(gx, gy)) {
+                return {
+                    x: gx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, 
+                    y: gy * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2
+                };
+            }
         }
         return null; 
     }
@@ -460,9 +487,21 @@ export default class Game {
         if (Utils.distance(this.player, {x: mx, y: my}) > CONFIG.BUILD_RANGE) return;
 
         const isOccupied = (tx, ty) => {
-            const tileCenter = { x: tx * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: ty * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2 };
+            const tileLeft = tx * CONFIG.TILE_SIZE;
+            const tileRight = tileLeft + CONFIG.TILE_SIZE;
+            const tileTop = ty * CONFIG.TILE_SIZE;
+            const tileBottom = tileTop + CONFIG.TILE_SIZE;
+
             const allEntities = [this.player, ...this.npcs, ...this.animals, ...this.boats];
-            return allEntities.some(e => Utils.distance(e, tileCenter) < CONFIG.TILE_SIZE/1.5);
+            
+            return allEntities.some(e => {
+                const eLeft = e.x - 8;
+                const eRight = e.x + 8;
+                const eTop = e.y - 8;
+                const eBottom = e.y + 8;
+                return (eLeft < tileRight && eRight > tileLeft && 
+                        eTop < tileBottom && eBottom > tileTop);
+            });
         };
 
         if (this.input.mouse.clickedLeft) {
@@ -522,7 +561,14 @@ export default class Game {
                 if (sel) {
                     const id = sel;
                     const canAfford = (c) => this.godMode || (this.player.inventory[id] || 0) >= c;
+                    
                     if (canAfford(1)) {
+                       const tileDef = ID_TO_TILE[id];
+                       if (tileDef.solid && isOccupied(gx, gy)) {
+                            this.spawnText(mx, my, "BLOCKED", "#f00");
+                            return;
+                       }
+
                        if (this.tryBuild(gx, gy, id, false, false)) {
                            if(!this.godMode) this.player.inventory[id]--;
                            this.updateUI();
@@ -557,7 +603,8 @@ export default class Game {
                 if (affordable) {
                     if (this.activeBlueprint.special === 'boat') {
                         const targetId = this.world.getTile(gx, gy);
-                        const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id, TILES.SAND.id];
+                        // [FIXED] Removed TILES.SAND.id so boats only spawn on Water/DeepWater
+                        const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id];
                         if (!allowed.includes(targetId)) {
                             this.spawnText(mx * this.zoom, my * this.zoom, "INVALID LOCATION", "#f00");
                             return;
@@ -912,8 +959,13 @@ export default class Game {
                     const gx = Math.floor(sx / CONFIG.TILE_SIZE);
                     const gy = Math.floor(sy / CONFIG.TILE_SIZE);
                     
-                    const tile = this.world.getTile(gx, gy);
-                    if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
+                    const checkWater = (cx, cy) => {
+                        const tile = this.world.getTile(Math.floor(cx/CONFIG.TILE_SIZE), Math.floor(cy/CONFIG.TILE_SIZE));
+                        return tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
+                    };
+
+                    // Check center + offsets to ensure full boat fits
+                    if (checkWater(sx, sy) && checkWater(sx + 16, sy) && checkWater(sx - 16, sy)) {
                         this.boats.push(new Boat(sx, sy, 'enemy'));
                         this.spawnText(sx, sy, "NEW INVASION", "#f00");
                         
@@ -1008,8 +1060,10 @@ export default class Game {
             const occupied = [...this.npcs, ...this.animals].some(e => Utils.distance(e, spawnPoint) < CONFIG.TILE_SIZE);
 
             if (!occupied) {
-                const tile = this.world.getTile(ngx, ngy);
-                if (tile === TILES.GRASS.id && this.world.getTile(ngx+1, ngy) !== TILES.WATER.id) {
+                const tileId = this.world.getTile(ngx, ngy);
+                const tileDef = ID_TO_TILE[tileId];
+                // [FIX] Ensure not solid (trees, rocks)
+                if (!tileDef.solid && !tileDef.isWater) {
                     this.animals.push(new Sheep(nx, ny));
                 }
             }
