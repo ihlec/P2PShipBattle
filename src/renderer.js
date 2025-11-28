@@ -103,7 +103,6 @@ export default class Renderer {
                     this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
                 
-                // [FIXED] Restored Stone Block Details
                 if (id === TILES.STONE_BLOCK.id) {
                     this.ctx.fillStyle = TILES.GRASS.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
@@ -234,9 +233,23 @@ export default class Renderer {
                     if (obj._type === 'boat') {
                         this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
                     } else if (obj._type === 'loot') {
+                        // Draw Floating Crate
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
-                        this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
-                        this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
+                        this.ctx.save();
+                        this.ctx.translate(obj.x, obj.y + bob);
+                        this.ctx.rotate(Math.sin((Date.now()/500) + obj.bob) * 0.2);
+                        
+                        this.ctx.fillStyle = '#CD853F'; 
+                        this.ctx.fillRect(-8, -8, 16, 16);
+                        this.ctx.strokeStyle = '#5C3317';
+                        this.ctx.strokeRect(-8, -8, 16, 16);
+                        
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(-8,-8); this.ctx.lineTo(8,8);
+                        this.ctx.moveTo(8,-8); this.ctx.lineTo(-8,8);
+                        this.ctx.stroke();
+                        this.ctx.restore();
+                        
                     } else if (obj._type === 'sheep') {
                         this.drawSheep(obj._orig);
                     } else {
@@ -262,7 +275,6 @@ export default class Renderer {
             if(p.draw) p.draw(this.ctx, 0, 0); 
         });
 
-        // Draw Particles (including Wake)
         this.game.particles.forEach(p => p.draw(this.ctx, this.game.camera.x, this.game.camera.y)); 
 
         if (this.game.activeBlueprint) {
@@ -351,7 +363,7 @@ export default class Renderer {
                     this.ctx.fillRect(dx, dy+12, ts, 1);
                 }
 
-                if (type === 44) { // BOW
+                if (type === 44) { 
                     this.ctx.fillStyle = TILES.SHIP_DECK.color;
                     this.ctx.beginPath();
                     this.ctx.moveTo(dx + ts/2, dy);
@@ -411,13 +423,10 @@ export default class Renderer {
             this.ctx.save();
             this.ctx.translate(mastX, mastY);
             
-            // [FIXED] Dynamic Sail Logic
             let windAngle = this.game.world.wind.angle;
             let diff = windAngle - heading;
-            // Normalize to -PI...PI
             diff = Math.atan2(Math.sin(diff), Math.cos(diff));
             
-            // Allow swinging +/- 1.0 radian (approx 60 deg) to catch wind
             let sailRot = Math.max(-1.0, Math.min(1.0, diff));
             
             this.ctx.rotate(sailRot);
@@ -428,12 +437,8 @@ export default class Renderer {
             this.ctx.fillStyle = owner === 'enemy' ? '#111' : '#eee'; 
             this.ctx.beginPath();
             
-            // [FIXED] Concavity: Billow Forward (Negative Y in local space)
-            // Local Space: -Y is Forward (Bow), +Y is Aft (Stern)
-            // Wind pushing from back to front.
-            // Curve control point is (0, -25) to billow forward.
             this.ctx.moveTo(-30, 0); 
-            this.ctx.quadraticCurveTo(0, -25, 30, 0); // Negative Y = Billows "Forward" (Up on screen)
+            this.ctx.quadraticCurveTo(0, -25, 30, 0); 
             this.ctx.lineTo(30, 2);
             this.ctx.quadraticCurveTo(0, -23, -30, 2);
             this.ctx.fill();

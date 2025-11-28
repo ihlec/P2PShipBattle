@@ -10,7 +10,6 @@ export default class Game {
         this.canvas = document.getElementById('gameCanvas');
         this.input = new InputHandler(this);
         
-        // --- GAME STATE ---
         let validSpawn = null;
         let attempts = 0;
         
@@ -56,7 +55,6 @@ export default class Game {
         this.invasionTimer = 0;
         this.nextInvasionTime = 0; 
         
-        // --- UI REFS ---
         this.dom = {
             hp: document.getElementById('hp'),
             coords: document.getElementById('coords'),
@@ -75,7 +73,6 @@ export default class Game {
         
         this.dom.seed.innerText = this.world.seed;
         
-        // --- INITIALIZE RENDERER ---
         this.renderer = new Renderer(this, this.canvas);
 
         document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
@@ -83,7 +80,6 @@ export default class Game {
         document.getElementById('btn-save').onclick = () => this.saveGame();
         document.getElementById('btn-load').onclick = () => this.loadGame();
         
-        // Resize Listener
         window.addEventListener('resize', () => {
             this.renderer.resize();
             this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
@@ -96,6 +92,24 @@ export default class Game {
                 this.godMode = !this.godMode;
                 this.showMessage(this.godMode ? "GOD MODE ON" : "GOD MODE OFF");
                 this.updateUI(); 
+            }
+            // [NEW] DEBUG SPAWN ENEMY
+            if (e.key.toLowerCase() === 'h') {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 400; 
+                const ex = this.player.x + Math.cos(angle) * dist;
+                const ey = this.player.y + Math.sin(angle) * dist;
+                
+                // Ensure water
+                const gx = Math.floor(ex/CONFIG.TILE_SIZE);
+                const gy = Math.floor(ey/CONFIG.TILE_SIZE);
+                const tile = this.world.getTile(gx, gy);
+                if(tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
+                    this.boats.push(new Boat(ex, ey, 'enemy'));
+                    this.showMessage("ENEMY SHIP SPAWNED", "#f00");
+                } else {
+                    this.showMessage("CANNOT SPAWN LAND", "#f00");
+                }
             }
         });
 
@@ -521,14 +535,14 @@ export default class Game {
                     }
                 }
 
-                if (occupied) { this.spawnText(mx, my, "OCCUPIED", "#f00"); return; }
+                if (occupied) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
 
                 if (affordable) {
                     if (this.activeBlueprint.special === 'boat') {
                         const targetId = this.world.getTile(gx, gy);
                         const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id, TILES.SAND.id];
                         if (!allowed.includes(targetId)) {
-                            this.spawnText(mx, my, "INVALID LOCATION", "#f00");
+                            this.spawnText(mx * this.zoom, my * this.zoom, "INVALID LOCATION", "#f00");
                             return;
                         }
                         
@@ -544,12 +558,12 @@ export default class Game {
                     if (this.activeBlueprint.special === 'bridge') {
                         const targetId = this.world.getTile(gx, gy);
                         if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id && targetId !== TILES.WOOD_RAIL.id) {
-                             this.spawnText(mx, my, "MUST BUILD ON WATER/RAIL", "#f00"); return;
+                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00"); return;
                         }
                     } else if (this.activeBlueprint.requiresWater) {
                         const targetId = this.world.getTile(gx, gy);
                         if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id) {
-                             this.spawnText(mx, my, "MUST BUILD ON WATER", "#f00"); return;
+                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00"); return;
                         }
                     }
                     
@@ -576,7 +590,7 @@ export default class Game {
                     }
                 }
             } else {
-                if (isOccupied(gx, gy)) { this.spawnText(mx, my, "OCCUPIED", "#f00"); return; }
+                if (isOccupied(gx, gy)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
                     if (this.tryBuild(gx, gy, id, false, false)) {
@@ -1094,9 +1108,13 @@ export default class Game {
         
         this.boats = this.boats.filter(b => {
              if (b.hp <= 0) {
-                 this.loot.push({x: b.x, y: b.y, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
-                 this.loot.push({x: b.x, y: b.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
-                 this.spawnParticles(b.x, b.y, '#8B4513', 10);
+                 // [NEW] Wreckage & Floating Loot
+                 // Spawn planks
+                 for(let i=0; i<8; i++) {
+                     this.spawnParticles(b.x + (Math.random()-0.5)*40, b.y + (Math.random()-0.5)*40, '#8B4513', 3);
+                 }
+                 // Spawn Crate
+                 this.loot.push({x: b.x, y: b.y, id: TILES.CRATE.id, qty: 1, bob: Math.random()*100});
                  
                  if (this.player.inBoat && b.x === this.player.x && b.y === this.player.y) {
                      this.player.inBoat = false;
@@ -1113,8 +1131,18 @@ export default class Game {
         this.texts = this.texts.filter(t => t.life > 0);
         this.loot = this.loot.filter(l => {
             if (Utils.distance(this.player, l) < 32) {
-                this.player.inventory[l.id] = (this.player.inventory[l.id]||0) + l.qty;
-                this.spawnText(this.player.x, this.player.y - 30, `+${l.qty} ${ID_TO_TILE[l.id].short}`, "#ff0");
+                // If picking up a CRATE, give random loot
+                if (l.id === TILES.CRATE.id) {
+                    const wood = 10 + Math.floor(Math.random() * 10);
+                    const iron = 5 + Math.floor(Math.random() * 5);
+                    this.player.inventory[TILES.WOOD.id] += wood;
+                    this.player.inventory[TILES.IRON.id] += iron;
+                    this.spawnText(this.player.x, this.player.y - 40, `+${wood} Wood`, "#f0aa00");
+                    this.spawnText(this.player.x, this.player.y - 20, `+${iron} Iron`, "#aaa");
+                } else {
+                    this.player.inventory[l.id] = (this.player.inventory[l.id]||0) + l.qty;
+                    this.spawnText(this.player.x, this.player.y - 30, `+${l.qty} ${ID_TO_TILE[l.id].short}`, "#ff0");
+                }
                 this.updateUI();
                 return false;
             }

@@ -77,6 +77,7 @@ export const TILES = {
     
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' },
     BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' },
+    CRATE: { id: 26, color: '#CD853F', solid: false, name: 'Crate', short: 'Box' },
     
     TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10, light: 200 },
 
@@ -85,7 +86,7 @@ export const TILES = {
     SWORD_WOOD: { id: 32, color: '#5C3317', solid: false, name: 'Wd.Sword', short: 'W.Swd' },
     SWORD_IRON: { id: 33, color: '#ccc', solid: false, name: 'Ir.Sword', short: 'I.Swd' },
 
-    // [NEW] Ship Aesthetics
+    // Ship Aesthetics
     SHIP_DECK: { id: 40, color: '#8B5A2B', solid: false, name: 'Deck' },
     SHIP_RAIL: { id: 41, color: '#5C3317', solid: true, name: 'Rail' },
     SHIP_MAST: { id: 42, color: '#3E2723', solid: true, name: 'Mast' },
@@ -94,16 +95,13 @@ export const TILES = {
     SHIP_STERN: { id: 45, color: '#5C3317', solid: true, name: 'Stern' }
 };
 
-// [MODIFIED] More detailed ship layout (0 = Empty, but processed relative to boat center)
-// 3 columns x 6 rows
-// Grid is relative to center.
 export const SHIP_LAYOUT = [
-    [0, 44, 0], // Bow (Pointy)
-    [41, 40, 41], // Front Deck (Rails on side)
-    [43, 42, 43], // Main Mast + Cannons
-    [41, 40, 41], // Mid Deck
-    [43, 40, 43], // Rear Cannons
-    [45, 45, 45]  // Stern (Poop Deck / Captains Quarters)
+    [0, 44, 0], 
+    [41, 40, 41], 
+    [43, 42, 43], 
+    [41, 40, 41], 
+    [43, 40, 43], 
+    [45, 45, 45]  
 ];
 
 export const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
