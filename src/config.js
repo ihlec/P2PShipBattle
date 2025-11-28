@@ -1,5 +1,3 @@
-import { CONFIG as OLD_CONFIG, TILES as OLD_TILES, BLUEPRINTS as OLD_BP, WEAPONS as OLD_WP } from './config.js';
-
 export const CONFIG = {
     TILE_SIZE: 32,
     PLAYER_SPEED_BASE: 2,
@@ -50,8 +48,8 @@ export const CONFIG = {
 };
 
 export const TILES = {
-    WATER: { id: 0, color: '#2b2b96', solid: true, name: 'Ocean', short: 'H2O' },
-    DEEP_WATER: { id: 18, color: '#1a1a6e', solid: true, name: 'Deep Ocean', short: 'D.H2O' },
+    WATER: { id: 0, color: '#2b2b96', solid: true, name: 'Ocean', short: 'H2O', isWater: true },
+    DEEP_WATER: { id: 18, color: '#1a1a6e', solid: true, name: 'Deep Ocean', short: 'D.H2O', isWater: true },
     GRASS: { id: 1, color: '#2d6e32', solid: false, name: 'Grass', short: 'Grs' },
     SAND:  { id: 2, color: '#c2b280', solid: false, name: 'Sand', short: 'Snd' },
     GREY:  { id: 3, color: '#777777', solid: false, name: 'Stone/Road', short: 'Stn' },
@@ -62,9 +60,12 @@ export const TILES = {
     WALL:  { id: 9, color: '#555555', solid: true, name: 'Wall', short: 'Wal', hp: 100 },
     WOOD:  { id: 10, color: '#8B4513', solid: false, name: 'Wood', short: 'Wod' },
     STONE_BLOCK: { id: 11, color: '#777777', solid: true, name: 'Boulder', short: 'Bld', hp: 80 }, 
-    TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St', hp: 150 },
-    TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir', hp: 300 },
-    TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd', hp: 500 },
+    
+    // [MODIFIED] Added isTower, light, and cannonDamage to allow generic checks
+    TOWER_BASE_STONE: { id: 12, color: '#555555', solid: true, name: 'Stone Tower', short: 'T.St', hp: 150, isTower: true, light: 150, cannonDamage: 20 },
+    TOWER_BASE_IRON:  { id: 14, color: '#333333', solid: true, name: 'Iron Tower', short: 'T.Ir', hp: 300, isTower: true, light: 150, cannonDamage: 40 },
+    TOWER_BASE_GOLD:  { id: 15, color: '#886600', solid: true, name: 'Gold Tower', short: 'T.Gd', hp: 500, isTower: true, light: 150, cannonDamage: 80 },
+    
     ROOF: { id: 13, color: '#5C3317', solid: false, name: 'Roof', short: 'Rof' },
     
     WOOD_WALL: { id: 16, color: '#6F4E37', solid: true, name: 'Fence (Closed)', short: 'Fnc.C', hp: 50 },
@@ -78,8 +79,8 @@ export const TILES = {
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' },
     BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' },
     
-    // [MODIFIED] Added HP for destruction
-    TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10 },
+    // [MODIFIED] Added light property
+    TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10, light: 200 },
 
     // WEAPONS AS ITEMS
     SPEAR_WOOD: { id: 30, color: '#5C3317', solid: false, name: 'Wd.Spear', short: 'W.Spr' },
