@@ -155,9 +155,8 @@ export class Entity {
 
         this.aiState = { 
             mode: 'chase', 
-            tx: 0, 
-            ty: 0, 
-            timer: 0 
+            tackState: 1, // 1 or -1 for zigzag direction
+            tackTimer: 0 
         };
     }
     
@@ -168,7 +167,7 @@ export class Entity {
 
         let fireAngle = stats.heading + (side === 'right' ? Math.PI/2 : -Math.PI/2);
         
-        // [FIX] 2 Shots to match visual cannons (Front Deck and Rear Deck)
+        // 2 Shots to match visual cannons
         const offsets = [10, -22]; 
         offsets.forEach(off => {
             const spawnX = this.x + Math.cos(stats.heading) * off;
@@ -401,6 +400,7 @@ export class Boat extends Entity {
         this.travelTimer = (this.owner === 'enemy') ? 1800 + Math.random() * 16200 : 0;
     }
 
+    // [MODIFIED] Advanced Naval AI (Tacking & Broadsides)
     updateAI(dt, player, world, game) {
         if (this.owner !== 'enemy') return;
 
@@ -410,8 +410,6 @@ export class Boat extends Entity {
         const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
 
         if (!this.isLanded && isWater) {
-            if (this.travelTimer > 0) this.travelTimer--;
-
             const dist = Utils.distance(this, player);
             const input = { up: false, down: false, left: false, right: false };
             
@@ -422,17 +420,39 @@ export class Boat extends Entity {
 
             let desiredAngle = angleToPlayer;
 
-            if (this.travelTimer > 0) {
-                desiredAngle = angleToPlayer + Math.PI / 2;
-                if (dist > 600) desiredAngle = angleToPlayer + Math.PI / 4;
-            } else {
-                if (dist < CONFIG.BOAT.ENEMY_ENGAGE_RANGE) {
-                    desiredAngle = angleToPlayer + Math.PI / 2; 
-                } else {
-                    desiredAngle = angleToPlayer; 
-                }
+            // --- 1. STATE MACHINE ---
+            // If very close, try to ORBIT (Broadside). If far, CHASE.
+            const BROADSIDE_RANGE = 300;
+            const MIN_RANGE = 150;
+
+            if (dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
+                // ORBIT: Turn perpendicular to player
+                // Check which side is closer to firing solution
+                let relative = angleToPlayer - heading;
+                while (relative > Math.PI) relative -= Math.PI * 2;
+                while (relative < -Math.PI) relative += Math.PI * 2;
+
+                if (relative > 0) desiredAngle = angleToPlayer - Math.PI/2; // Keep player on right
+                else desiredAngle = angleToPlayer + Math.PI/2; // Keep player on left
             }
 
+            // --- 2. WIND AWARENESS & TACKING ---
+            // Check if desired heading is into the wind ("No Go Zone")
+            const windDir = world.wind.angle;
+            let windDiff = Math.cos(windDir - desiredAngle);
+            
+            // If facing wind (cos < -0.5), we must TACK
+            if (windDiff < -0.5) {
+                this.aiState.tackTimer++;
+                if (this.aiState.tackTimer > 400) { // Switch tack every ~7 seconds
+                    this.aiState.tackState *= -1;
+                    this.aiState.tackTimer = 0;
+                }
+                // Target 45 degrees off the wind
+                desiredAngle = windDir + (Math.PI * 0.75 * this.aiState.tackState);
+            }
+
+            // --- 3. STEERING EXECUTION ---
             let diff = desiredAngle - heading;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
@@ -442,17 +462,21 @@ export class Boat extends Entity {
                 else input.left = true;
             }
 
-            if (Math.abs(diff) < 1.0 && dist > 100) input.up = true;
-            else if (dist < 100) input.down = true; 
+            // --- 4. THROTTLE CONTROL ---
+            // Slow down if overshoot or tight turn needed
+            if (Math.abs(diff) < 1.0) input.up = true; // Full speed ahead if on course
+            else if (Math.abs(diff) > 2.0) input.down = true; // Brake to turn faster? (Pivot)
+            else input.up = false; // Coast to turn
 
             this.updateBoatMovement(input, dt, world, game);
 
-            const angleToTarget = Math.atan2(player.y - this.y, player.x - this.x);
-            let angleRelative = angleToTarget - heading;
+            // --- 5. FIRING LOGIC ---
+            // Check if we actually have a shot lined up
+            let angleRelative = angleToPlayer - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
             while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
 
-            const broadsideThreshold = 0.4; 
+            const broadsideThreshold = 0.3; // Approx 17 degrees
             
             if (Math.abs(angleRelative - (-Math.PI/2)) < broadsideThreshold) {
                 this.shootBroadside(game, 'left');
@@ -462,6 +486,7 @@ export class Boat extends Entity {
             }
 
         } else if (this.isLanded) {
+            // [EXISTING SPAWN LOGIC]
             const minionAlive = this.activeMinion && 
                                 this.activeMinion.hp > 0 && 
                                 game.npcs.includes(this.activeMinion);
@@ -488,6 +513,7 @@ export class Boat extends Entity {
                 }
             }
         } else {
+            // Beaching Logic
             const angle = Math.atan2(player.y - this.y, player.x - this.x);
             const prevX = this.x;
             const prevY = this.y;
