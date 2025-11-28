@@ -1113,7 +1113,8 @@ export default class Game {
                 let target = validTargets.find(n => Utils.distance(c, n) < c.range);
                 
                 if (target) {
-                    this.projectiles.push(new Projectile(c.x, c.y - CONFIG.TILE_SIZE, target.x, target.y, c.damage, 12, '#fff', false));
+                    // [TOWER FIX] Passed 'true' for isPlayerOwner so it can damage Enemy Boats
+                    this.projectiles.push(new Projectile(c.x, c.y - CONFIG.TILE_SIZE, target.x, target.y, c.damage, 12, '#fff', true));
                     c.cooldown = 60;
                     this.spawnParticles(c.x, c.y - CONFIG.TILE_SIZE, '#aaa', 8);
                     if (!this.godMode) c.ammo--;
