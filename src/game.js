@@ -826,7 +826,9 @@ export default class Game {
                     return;
                 }
 
-                if (tileId === TILES.GREY.id || tileId === TILES.WOOD_RAIL.id) {
+                // --- REMOVAL LOGIC FOR BASIC TILES ---
+                const removable = [TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, TILES.WOOD.id, TILES.GREENS.id, TILES.WOOL.id];
+                if (removable.includes(tileId) || tileId === TILES.WOOD_RAIL.id) {
                     if (isOccupied(tx, ty)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
                     const biome = Utils.getBiome(tx, ty, this.world.seed);
                     let restoreId = (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) ? biome : TILES.GRASS.id;
@@ -834,9 +836,19 @@ export default class Game {
 
                     this.world.setTile(tx, ty, restoreId);
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 5);
-                    this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: tileId === TILES.GREY.id ? TILES.GREY.id : TILES.WOOD.id, qty: 1, bob: Math.random()*100});
+                    
+                    // Refund Item
+                    if (removable.includes(tileId)) {
+                        this.player.inventory[tileId] = (this.player.inventory[tileId] || 0) + 1;
+                        this.spawnText(tx*CONFIG.TILE_SIZE + 16, ty*CONFIG.TILE_SIZE, `+1 ${ID_TO_TILE[tileId].short}`, "#fff");
+                    } else if (tileId === TILES.WOOD_RAIL.id) {
+                        this.player.inventory[TILES.WOOD.id] = (this.player.inventory[TILES.WOOD.id] || 0) + 1;
+                        this.spawnText(tx*CONFIG.TILE_SIZE + 16, ty*CONFIG.TILE_SIZE, `+1 Wood`, "#fff");
+                    }
+
                     this.updateUI();
                 }
+                // -------------------------------------
             }
         }
     }
@@ -893,13 +905,16 @@ export default class Game {
     }
 
     update(dt) {
+        // [PARALLAX WIND FIX] Capture camera BEFORE update
+        const oldCamX = this.camera.x;
+        const oldCamY = this.camera.y;
+
         if (this.input.wheel !== 0) {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
         
         this.world.update(dt);
-        this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle));
-
+        
         if (this.shootCooldown > 0) this.shootCooldown--;
 
         this.regenTimer += dt;
@@ -943,6 +958,11 @@ export default class Game {
         const viewH = this.canvas.height / this.zoom;
         this.camera.x = this.player.x - viewW/2;
         this.camera.y = this.player.y - viewH/2;
+
+        // [PARALLAX WIND FIX] Calculate delta WITH ZOOM and pass to wind particles
+        const camDx = (this.camera.x - oldCamX) * this.zoom;
+        const camDy = (this.camera.y - oldCamY) * this.zoom;
+        this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle, camDx, camDy));
 
         this.handleInteraction();
 
@@ -1113,6 +1133,9 @@ export default class Game {
                     
                     if (p.owner === 'player' && n === this.player) return;
                     if (p.owner === 'enemy' && n.owner === 'enemy') return; 
+
+                    // [GOD MODE FIX] Invincible to Projectiles
+                    if (n === this.player && this.godMode) return;
 
                     // Allow shooting own boats IF EMPTY (not occupied by self)
                     if (n === this.player && this.player.inBoat) return;

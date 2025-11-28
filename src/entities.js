@@ -46,22 +46,35 @@ export class WindParticle {
     constructor(screenWidth, screenHeight) {
         this.x = Math.random() * screenWidth;
         this.y = Math.random() * screenHeight;
-        this.speed = CONFIG.WIND.SPEED_BASE + Math.random() * CONFIG.WIND.SPEED_VARIATION;
-        this.length = 5 + Math.random() * 15; 
+        
+        // [MODIFIED] Increased speed significantly to outrun the boat (Boat max is ~3.5)
+        // Multiplied base config by 4 to ensure it looks like fast wind
+        this.speed = (CONFIG.WIND.SPEED_BASE * 4) + Math.random() * (CONFIG.WIND.SPEED_VARIATION * 2);
+        
+        this.length = 10 + Math.random() * 20; // Slightly longer trails for speed effect
         this.thickness = Math.random() > 0.5 ? 1 : 2;
     }
 
-    update(screenWidth, screenHeight, angle) {
+    update(screenWidth, screenHeight, angle, camDx, camDy) {
         const dx = Math.cos(angle) * this.speed;
         const dy = Math.sin(angle) * this.speed;
         
-        this.x += dx;
-        this.y += dy;
+        // Parallax: Move wind based on its speed AND the camera movement
+        this.x += dx - camDx;
+        this.y += dy - camDy;
 
-        if (this.x < -20) this.x = screenWidth + 20;
-        if (this.x > screenWidth + 20) this.x = -20;
-        if (this.y < -20) this.y = screenHeight + 20;
-        if (this.y > screenHeight + 20) this.y = -20;
+        // [MODIFIED] Relative Wrapping
+        // Instead of hard setting x = width (which creates lines of particles),
+        // we add/subtract the width + buffer. This preserves particle grouping/spacing.
+        const buffer = 50;
+        const totalW = screenWidth + buffer * 2;
+        const totalH = screenHeight + buffer * 2;
+
+        if (this.x < -buffer) this.x += totalW;
+        if (this.x > screenWidth + buffer) this.x -= totalW;
+        
+        if (this.y < -buffer) this.y += totalH;
+        if (this.y > screenHeight + buffer) this.y -= totalH;
     }
 
     draw(ctx, angle) {
