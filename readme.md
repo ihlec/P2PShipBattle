@@ -20,3 +20,8 @@ MEDIVALPIXELS/
 - allow building boats only on water
 - towers should hit boats too
 - add autosave every 5 min
+
+- craft swords only one time
+- allow multi craft of spears
+- show crate loot only on water. Direct resource color on land
+

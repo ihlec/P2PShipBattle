@@ -10,6 +10,7 @@ export default class Game {
         this.canvas = document.getElementById('gameCanvas');
         this.input = new InputHandler(this);
         
+        // --- GAME STATE ---
         let validSpawn = null;
         let attempts = 0;
         
@@ -55,6 +56,7 @@ export default class Game {
         this.invasionTimer = 0;
         this.nextInvasionTime = 0; 
         
+        // --- UI REFS ---
         this.dom = {
             hp: document.getElementById('hp'),
             coords: document.getElementById('coords'),
@@ -73,6 +75,7 @@ export default class Game {
         
         this.dom.seed.innerText = this.world.seed;
         
+        // --- INITIALIZE RENDERER ---
         this.renderer = new Renderer(this, this.canvas);
 
         document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
@@ -80,6 +83,7 @@ export default class Game {
         document.getElementById('btn-save').onclick = () => this.saveGame();
         document.getElementById('btn-load').onclick = () => this.loadGame();
         
+        // Resize Listener
         window.addEventListener('resize', () => {
             this.renderer.resize();
             this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
@@ -93,14 +97,13 @@ export default class Game {
                 this.showMessage(this.godMode ? "GOD MODE ON" : "GOD MODE OFF");
                 this.updateUI(); 
             }
-            // [NEW] DEBUG SPAWN ENEMY
+            // DEBUG SPAWN ENEMY
             if (e.key.toLowerCase() === 'h') {
                 const angle = Math.random() * Math.PI * 2;
                 const dist = 400; 
                 const ex = this.player.x + Math.cos(angle) * dist;
                 const ey = this.player.y + Math.sin(angle) * dist;
                 
-                // Ensure water
                 const gx = Math.floor(ex/CONFIG.TILE_SIZE);
                 const gy = Math.floor(ey/CONFIG.TILE_SIZE);
                 const tile = this.world.getTile(gx, gy);
@@ -243,10 +246,17 @@ export default class Game {
         Object.values(WEAPONS).forEach((wp) => {
             const div = document.createElement('div');
             div.className = 'bp-item';
+            div.id = `wp-btn-${wp.id}`;
             let costStr = Object.entries(wp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
             div.innerHTML = `<div class="bp-name">${wp.name}</div><div class="bp-req">${costStr}</div>`;
             div.onclick = () => {
                 if (div.classList.contains('disabled')) return;
+                // One-time craft check for melee
+                if (wp.type === 'melee' && this.player.inventory[wp.id] > 0) {
+                    this.showMessage("ALREADY OWNED", "#f00");
+                    return;
+                }
+                
                 if (!this.godMode) {
                     for (const [id, qty] of Object.entries(wp.cost)) this.player.inventory[id] -= qty;
                 }
@@ -354,16 +364,21 @@ export default class Game {
             if (canAfford) div.classList.remove('disabled'); else div.classList.add('disabled');
         });
 
-        const wpItems = this.dom.wpnMenu.children;
         Object.values(WEAPONS).forEach((wp, i) => {
-            const div = wpItems[i];
+            const div = document.getElementById(`wp-btn-${wp.id}`);
+            if (!div) return;
+            
             let canAfford = true;
             if (wp.cost && !this.godMode) {
                 for (const [id, qty] of Object.entries(wp.cost)) {
                     if ((this.player.inventory[id] || 0) < qty) { canAfford = false; break; }
                 }
             }
-            if (canAfford) div.classList.remove('disabled'); else div.classList.add('disabled');
+            
+            let alreadyOwned = (wp.type === 'melee' && this.player.inventory[wp.id] > 0);
+            
+            if (canAfford && !alreadyOwned) div.classList.remove('disabled'); 
+            else div.classList.add('disabled');
         });
 
         if(this.activeBlueprint) {
@@ -373,7 +388,6 @@ export default class Game {
             this.dom.activeBp.style.display = 'none';
         }
         
-        // Update Time UI
         const t = this.world.time;
         const hour = Math.floor(t * 24);
         this.dom.biome.innerText += ` | ${hour}:00`;
@@ -440,7 +454,6 @@ export default class Game {
 
         const mx = (this.input.mouse.x / this.zoom) + this.camera.x;
         const my = (this.input.mouse.y / this.zoom) + this.camera.y;
-        
         const gx = Math.floor(mx / CONFIG.TILE_SIZE);
         const gy = Math.floor(my / CONFIG.TILE_SIZE);
 
@@ -455,6 +468,8 @@ export default class Game {
         if (this.input.mouse.clickedLeft) {
             
             const clickedTile = this.world.getTile(gx, gy);
+            
+            // 1. Toggle Gates
             if (clickedTile === TILES.WOOD_WALL.id) {
                 this.world.setTile(gx, gy, TILES.WOOD_WALL_OPEN.id);
                 this.spawnParticles(mx, my, TILES.WOOD.color, 4);
@@ -465,7 +480,8 @@ export default class Game {
                 this.spawnParticles(mx, my, TILES.WOOD.color, 4);
                 return;
             }
-
+            
+            // 2. Feed Sheep
             if (this.player.selectedTile === TILES.GREENS.id) {
                 const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
                 if (clickedSheep && !clickedSheep.fed) {
@@ -480,7 +496,22 @@ export default class Game {
                 }
             }
 
-            // --- SHOOTING ---
+            // 3. REFILL CANNONS
+            const cannon = this.cannons.find(c => {
+                const [cx, cy] = c.key.split(',').map(Number);
+                return gx === cx && gy === cy;
+            });
+            if (cannon && this.player.selectedTile === TILES.IRON.id) {
+                if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
+                    if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
+                    cannon.ammo += 5;
+                    this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
+                    this.updateUI();
+                    return;
+                }
+            }
+
+            // 4. Build or Shoot
             if (!this.activeBlueprint) {
                 const sel = this.player.selectedTile;
                 if (!sel) {
@@ -503,20 +534,6 @@ export default class Game {
             }
 
             if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return;
-
-            const cannon = this.cannons.find(c => {
-                const [cx, cy] = c.key.split(',').map(Number);
-                return gx === cx && gy === cy;
-            });
-            if (cannon && this.player.selectedTile === TILES.IRON.id) {
-                if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
-                    if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
-                    cannon.ammo += 5;
-                    this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
-                    this.updateUI();
-                    return;
-                }
-            }
 
             const canAfford = (id, cost) => this.godMode || (this.player.inventory[id] || 0) >= cost;
             const consume = (id, cost) => { if(!this.godMode) this.player.inventory[id] -= cost; };
@@ -604,9 +621,10 @@ export default class Game {
             
             if (this.player.inBoat) {
                 const clickedTile = this.world.getTile(gx, gy);
-                if (clickedTile === TILES.SAND.id || clickedTile === TILES.GRASS.id) {
+                // [MODIFIED] Increased Boarding Radius to 100 and included Rails/Bridges
+                if (clickedTile === TILES.SAND.id || clickedTile === TILES.GRASS.id || clickedTile === TILES.WOOD_RAIL.id || clickedTile === TILES.GREY.id) {
                     const dist = Utils.distance(this.player, {x: mx, y: my});
-                    if (dist < 60) {
+                    if (dist < 100) { 
                         const boatSpawnX = this.player.x;
                         const boatSpawnY = this.player.y;
 
@@ -614,7 +632,6 @@ export default class Game {
                         this.player.x = (gx * CONFIG.TILE_SIZE) + 16;
                         this.player.y = (gy * CONFIG.TILE_SIZE) + 16;
                         
-                        // Reset Boat Stats
                         this.player.boatStats.speed = 0;
                         this.player.boatStats.sailLevel = 0;
 
@@ -627,12 +644,11 @@ export default class Game {
             } else {
                 const clickedBoatIndex = this.boats.findIndex(b => Utils.distance(b, {x:mx, y:my}) < 32);
                 if (clickedBoatIndex !== -1) {
-                    if (Utils.distance(this.player, this.boats[clickedBoatIndex]) < 60) {
+                    if (Utils.distance(this.player, this.boats[clickedBoatIndex]) < 100) {
                         this.player.inBoat = true;
                         this.player.x = this.boats[clickedBoatIndex].x;
                         this.player.y = this.boats[clickedBoatIndex].y;
                         
-                        // Stop velocity on enter
                         this.player.boatStats.speed = 0;
 
                         this.boats.splice(clickedBoatIndex, 1);
@@ -735,7 +751,12 @@ export default class Game {
                     this.spawnText(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE, `-${damageDealt}`, '#fff');
 
                     if (totalDmg >= tileDef.hp) {
-                        this.world.setTile(tx, ty, TILES.GRASS.id); 
+                        const biome = Utils.getBiome(tx, ty, this.world.seed);
+                        let restoreId = TILES.GRASS.id;
+                        if (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) restoreId = biome;
+                        if (biome === TILES.SAND.id) restoreId = TILES.SAND.id;
+
+                        this.world.setTile(tx, ty, restoreId); 
                         this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
                         
                         if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {

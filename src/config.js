@@ -71,6 +71,7 @@ export const TILES = {
     WOOD_WALL_OPEN: { id: 23, color: '#5C3317', solid: false, name: 'Fence (Open)', short: 'Fnc.O', hp: 50 }, 
 
     WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral', hp: 30 },
+
     TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
     MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt', hp: 200 },
     GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' },

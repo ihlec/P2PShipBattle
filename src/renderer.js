@@ -46,40 +46,44 @@ export default class Renderer {
         addToBucket(this.game.player, 'player');
         this.game.loot.forEach(l => addToBucket(l, 'loot'));
 
-        // PASS 1: GROUND
+        // --- PASS 1: GROUND ---
         for (let r = startRow - 2; r <= endRow; r++) {
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.game.world.getTile(c, r);
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
 
+                // Draw Ground
                 if ((!tile.solid || tile.isWater) && id !== TILES.TREE.id && id !== TILES.WOOD_WALL_OPEN.id && id !== TILES.TORCH.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    
+                    // Ground Noise
+                    if (id === TILES.GRASS.id || id === TILES.SAND.id) {
+                        const noise = Utils.noise(c, r, this.game.world.seed);
+                        if (noise > 0.7) {
+                            this.ctx.fillStyle = 'rgba(0,0,0,0.05)';
+                            this.ctx.fillRect(tx + 8, ty + 8, 4, 4);
+                            this.ctx.fillRect(tx + 20, ty + 18, 3, 3);
+                        }
+                    }
                 }
                 
-                if (id === TILES.WOOD_WALL_OPEN.id) {
-                    const tx = c * CONFIG.TILE_SIZE;
-                    const ty = r * CONFIG.TILE_SIZE;
-                    this.ctx.fillStyle = TILES.GRASS.color;
-                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    this.ctx.fillStyle = tile.color;
-                    this.ctx.fillRect(tx, ty, 6, CONFIG.TILE_SIZE);
-                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 6, ty, 6, CONFIG.TILE_SIZE);
-                }
-                
-                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id || id === TILES.TORCH.id) {
+                // Draw floor under transparent objects
+                if (id === TILES.WOOD_WALL_OPEN.id || id === TILES.TREE.id || id === TILES.MOUNTAIN.id || id === TILES.TORCH.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
-                     this.ctx.fillStyle = TILES.GRASS.color; 
+                     const biome = Utils.getBiome(c, r, this.game.world.seed);
+                     const bgTile = ID_TO_TILE[biome];
+                     this.ctx.fillStyle = bgTile ? bgTile.color : '#000';
                      this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
             }
         }
 
-        // PASS 2: OBJECTS
+        // --- PASS 2: OBJECTS & BUILDINGS ---
         for (let r = startRow - 2; r <= endRow; r++) { 
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.game.world.getTile(c, r);
@@ -89,169 +93,127 @@ export default class Renderer {
                 const tx = c * CONFIG.TILE_SIZE;
                 const ty = r * CONFIG.TILE_SIZE;
 
-                if (tile.solid && !tile.isWater && id !== TILES.TREE.id && id !== TILES.MOUNTAIN.id && id !== TILES.STONE_BLOCK.id && !tile.isTower) {
+                // 1. Road/Bridge Block (GREY)
+                if (id === TILES.GREY.id) {
+                    this.ctx.fillStyle = tile.color;
+                }
+                
+                // 2. Walls
+                else if (id === TILES.WALL.id) {
+                    this.drawStoneWall(tx, ty, tile.color, c, r);
+                }
+                // 3. Fences
+                else if (id === TILES.WOOD_WALL.id || id === TILES.WOOD_WALL_OPEN.id) {
+                    this.drawWoodFence(tx, ty, c, r, id === TILES.WOOD_WALL_OPEN.id);
+                }
+                // 4. Bridge Rails (Solid only)
+                else if (id === TILES.WOOD_RAIL.id) {
+                    this.ctx.fillStyle = tile.color;
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    this.ctx.fillRect(tx+4, ty+4, CONFIG.TILE_SIZE-8, CONFIG.TILE_SIZE-8);
+                    this.ctx.fillStyle = tile.color;
+                    this.ctx.fillRect(tx+8, ty+8, CONFIG.TILE_SIZE-16, CONFIG.TILE_SIZE-16);
+                }
+                // 5. Towers
+                else if (tile.isTower) {
+                    this.drawTower(tx, ty, tile.color, c, r, id);
+                }
+                // 6. Boulders
+                else if (id === TILES.STONE_BLOCK.id) {
+                    this.drawBoulder(tx, ty, c, r);
+                }
+                // 7. Trees
+                else if (id === TILES.TREE.id) {
+                    this.drawTree(tx, ty, c, r, rowBuckets);
+                }
+                // 8. Mountains
+                else if (id === TILES.MOUNTAIN.id) {
+                    this.ctx.fillStyle = Utils.hsl(0, 0, 60, c, r, this.game.world.seed, 0, 15);
+                    this.ctx.fillRect(tx, ty - 8, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE + 8); 
+                    this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(tx, ty + CONFIG.TILE_SIZE);
+                    this.ctx.lineTo(tx + CONFIG.TILE_SIZE/2, ty - 8);
+                    this.ctx.lineTo(tx + CONFIG.TILE_SIZE, ty + CONFIG.TILE_SIZE);
+                    this.ctx.fill();
+                }
+                // 9. Torches
+                else if (id === TILES.TORCH.id) {
+                    this.ctx.fillStyle = '#555';
+                    this.ctx.fillRect(tx + 14, ty + 10, 4, 12); 
+                    this.ctx.fillStyle = '#ffaa00';
+                    const flicker = Math.random() * 2;
+                    this.ctx.beginPath();
+                    this.ctx.arc(tx + 16, ty + 8, 4 + flicker, 0, Math.PI*2);
+                    this.ctx.fill();
+                }
+                // 10. Fallback
+                else if (tile.solid && !tile.isWater && id !== TILES.MOUNTAIN.id && id !== TILES.STONE_BLOCK.id && !tile.isTower && id !== TILES.WALL.id && id !== TILES.WOOD_WALL.id && id !== TILES.WOOD_RAIL.id && id !== TILES.GREY.id) {
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                     this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
                     this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
                     this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
-                    this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, 4); 
-                    this.ctx.fillRect(tx, ty, 4, CONFIG.TILE_SIZE); 
-                    this.ctx.lineWidth = 1;
                     this.ctx.strokeStyle = 'rgba(0,0,0,0.5)';
                     this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
-                
-                if (id === TILES.STONE_BLOCK.id) {
-                    this.ctx.fillStyle = TILES.GRASS.color;
-                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    const shapeR = Utils.noise(c, r, this.game.world.seed + 777);
-                    this.ctx.fillStyle = Utils.hsl(0, 0, 55, c, r, this.game.world.seed, 0, 10);
 
-                    if (shapeR < 0.33) {
-                        this.ctx.fillRect(tx + 4, ty + 4, 24, 24);
-                        this.ctx.fillRect(tx + 2, ty + 8, 4, 16); 
-                        this.ctx.fillRect(tx + 26, ty + 8, 4, 16);
-                        this.ctx.fillRect(tx + 8, ty + 2, 16, 4); 
-                        this.ctx.fillRect(tx + 8, ty + 26, 16, 4); 
-                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                        this.ctx.fillRect(tx + 8, ty + 6, 8, 4);
-                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                        this.ctx.fillRect(tx + 8, ty + 22, 16, 6);
-                    } else if (shapeR < 0.66) {
-                        this.ctx.fillRect(tx + 2, ty + 12, 28, 18);
-                        this.ctx.fillRect(tx + 6, ty + 8, 20, 4);
-                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                        this.ctx.fillRect(tx + 6, ty + 8, 20, 2);
-                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                        this.ctx.fillRect(tx + 22, ty + 12, 8, 18);
-                    } else {
-                        this.ctx.fillRect(tx + 2, ty + 14, 12, 14); 
-                        this.ctx.fillRect(tx + 12, ty + 6, 18, 22); 
-                        this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
-                        this.ctx.fillRect(tx + 14, ty + 6, 10, 4);
-                        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                        this.ctx.fillRect(tx + 8, ty + 20, 6, 8);
-                    }
-                }
-
+                // HP Bars on tiles
                 if (tile.hp) {
                     const dmg = this.game.world.getTileDamage(c, r);
                     if (dmg > 0) {
                         const max = tile.hp;
                         const w = 24; const h = 4;
-                        const bx = tx + 4; const by = ty - 10;
-                        this.ctx.fillStyle = '#300';
+                        const bx = tx + 4; const by = ty - 12;
+                        this.ctx.fillStyle = '#000';
+                        this.ctx.fillRect(bx-1, by-1, w+2, h+2);
+                        this.ctx.fillStyle = '#f00';
                         this.ctx.fillRect(bx, by, w, h);
-                        this.ctx.fillStyle = '#fff';
+                        this.ctx.fillStyle = '#0f0';
                         this.ctx.fillRect(bx, by, w * ((max - dmg) / max), h);
                     }
                 }
-
-                if (id === TILES.MOUNTAIN.id) {
-                    this.ctx.fillStyle = Utils.hsl(0, 0, 60, c, r, this.game.world.seed, 0, 15);
-                    this.ctx.fillRect(tx, ty - 8, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE + 8); 
-                    this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
-                    this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty - 8, 4, CONFIG.TILE_SIZE + 8);
-                    this.ctx.fillStyle = '#eee'; 
-                    this.ctx.fillRect(tx + 4, ty - 8, CONFIG.TILE_SIZE - 8, 8);
-                }
-
-                if (id === TILES.TREE.id) {
-                    let isOccluding = false;
-                    for (let checkR = r - 2; checkR < r; checkR++) {
-                        if (rowBuckets[checkR] && rowBuckets[checkR].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) isOccluding = true;
-                    }
-                    this.ctx.globalAlpha = isOccluding ? 0.4 : 1.0;
-                    this.ctx.fillStyle = Utils.hsl(25, 57, 23, c, r, this.game.world.seed + 100, 5, 5);
-                    this.ctx.fillRect(tx + 12, ty - 8, 8, 24); 
-                    this.ctx.fillStyle = Utils.hsl(120, 61, 34, c, r, this.game.world.seed, 15, 10);
-                    
-                    const shapeR = Utils.noise(c, r, this.game.world.seed + 555);
-                    if (shapeR < 0.33) {
-                        this.ctx.fillRect(tx, ty - 24, 32, 24);
-                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
-                        this.ctx.fillRect(tx + 4, ty - 20, 24, 16);
-                    } else if (shapeR < 0.66) {
-                        this.ctx.fillRect(tx + 2, ty - 16, 28, 16); 
-                        this.ctx.fillRect(tx + 6, ty - 30, 20, 14); 
-                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
-                        this.ctx.fillRect(tx + 8, ty - 26, 16, 22);
-                    } else {
-                        this.ctx.fillRect(tx - 2, ty - 20, 36, 20); 
-                        this.ctx.fillRect(tx + 6, ty - 26, 20, 6); 
-                        this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
-                        this.ctx.fillRect(tx + 4, ty - 16, 24, 12);
-                    }
-                    this.ctx.globalAlpha = 1.0;
-                }
-
-                if (id === TILES.TORCH.id) {
-                    this.ctx.fillStyle = '#555';
-                    this.ctx.fillRect(tx + 14, ty + 10, 4, 12); 
-                    this.ctx.fillStyle = '#ffaa00';
-                    const flicker = Math.random() * 2;
-                    this.ctx.fillRect(tx + 12 - flicker, ty + 6 - flicker, 8 + flicker*2, 8 + flicker*2); 
-                }
-
-                if (tile.isTower) {
-                    let isOccluding = false;
-                    for (let checkR = r - 2; checkR < r; checkR++) {
-                        if (rowBuckets[checkR] && rowBuckets[checkR].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) isOccluding = true;
-                    }
-                    this.ctx.globalAlpha = isOccluding ? 0.4 : 1.0;
-                    this.ctx.fillStyle = tile.color;
-                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-
-                    this.ctx.fillStyle = (id === TILES.TOWER_BASE_IRON.id ? '#444' : id === TILES.TOWER_BASE_GOLD.id ? '#ffd700' : '#777');
-                    this.ctx.fillRect(tx, ty - CONFIG.TILE_SIZE, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    this.ctx.strokeRect(tx, ty - CONFIG.TILE_SIZE, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    
-                    this.ctx.fillStyle = '#5C3317';
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(tx, ty - CONFIG.TILE_SIZE);
-                    this.ctx.lineTo(tx + CONFIG.TILE_SIZE, ty - CONFIG.TILE_SIZE);
-                    this.ctx.lineTo(tx + CONFIG.TILE_SIZE/2, ty - CONFIG.TILE_SIZE*2);
-                    this.ctx.closePath();
-                    this.ctx.fill();
-                    this.ctx.stroke();
-
-                    const cannon = this.game.cannons.find(can => can.key === `${c},${r}`);
-                    if (cannon) {
-                        this.ctx.fillStyle = cannon.ammo > 0 ? '#0ff' : '#f00';
-                        this.ctx.font = '10px monospace';
-                        this.ctx.fillText(cannon.ammo, tx + 10, ty + 20);
-                    }
-                    this.ctx.globalAlpha = 1.0;
-                }
             }
 
+            // --- ENTITIES ---
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'boat') {
                         this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
                     } else if (obj._type === 'loot') {
-                        // Draw Floating Crate
+                        // [FIXED] Loot Rendering Logic
+                        const gx = Math.floor(obj.x / CONFIG.TILE_SIZE);
+                        const gy = Math.floor(obj.y / CONFIG.TILE_SIZE);
+                        const tileId = this.game.world.getTile(gx, gy);
+                        const isWater = (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id);
+
                         const bob = Math.sin((Date.now()/200) + obj.bob) * 3;
-                        this.ctx.save();
-                        this.ctx.translate(obj.x, obj.y + bob);
-                        this.ctx.rotate(Math.sin((Date.now()/500) + obj.bob) * 0.2);
-                        
-                        this.ctx.fillStyle = '#CD853F'; 
-                        this.ctx.fillRect(-8, -8, 16, 16);
-                        this.ctx.strokeStyle = '#5C3317';
-                        this.ctx.strokeRect(-8, -8, 16, 16);
-                        
-                        this.ctx.beginPath();
-                        this.ctx.moveTo(-8,-8); this.ctx.lineTo(8,8);
-                        this.ctx.moveTo(8,-8); this.ctx.lineTo(-8,8);
-                        this.ctx.stroke();
-                        this.ctx.restore();
-                        
+
+                        if (isWater) {
+                            // Floating Crate
+                            this.ctx.save();
+                            this.ctx.translate(obj.x, obj.y + bob);
+                            this.ctx.rotate(Math.sin((Date.now()/500) + obj.bob) * 0.2);
+                            this.ctx.fillStyle = '#CD853F'; 
+                            this.ctx.fillRect(-8, -8, 16, 16);
+                            this.ctx.strokeStyle = '#5C3317';
+                            this.ctx.lineWidth = 2;
+                            this.ctx.strokeRect(-8, -8, 16, 16);
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(-8,-8); this.ctx.lineTo(8,8);
+                            this.ctx.moveTo(8,-8); this.ctx.lineTo(-8,8);
+                            this.ctx.stroke();
+                            this.ctx.restore();
+                        } else {
+                            // Land Resource Cube
+                            this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
+                            this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
+                            this.ctx.strokeRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
+                        }
+
                     } else if (obj._type === 'sheep') {
-                        this.drawSheep(obj._orig);
+                        this.drawSheep(obj._orig); 
                     } else {
                         const isPlayer = obj._type === 'player';
                         if (isPlayer && obj._orig.inBoat) {
@@ -263,7 +225,7 @@ export default class Renderer {
                             this.ctx.fillRect(-4, -4, 8, 8); 
                             this.ctx.restore();
                         } else {
-                            this.drawCharacter(obj._orig, isPlayer);
+                            this.drawCharacter(obj._orig, isPlayer); 
                         }
                     }
                 });
@@ -312,6 +274,151 @@ export default class Renderer {
             this.ctx.fillText(t.txt, t.x, t.y);
         });
         this.ctx.restore();
+    }
+
+    // --- PROCEDURAL DRAWING HELPERS ---
+
+    drawStoneWall(tx, ty, color, c, r) {
+        const ts = CONFIG.TILE_SIZE;
+        this.ctx.fillStyle = '#444';
+        this.ctx.fillRect(tx, ty, ts, ts);
+        this.ctx.fillStyle = color;
+        
+        const seed = c * 1000 + r; 
+        const noise = Utils.noise(c, r, seed);
+        
+        this.ctx.fillRect(tx + 2, ty + 2, 12, 8);
+        this.ctx.fillRect(tx + 16, ty + 2, 14, 8);
+        this.ctx.fillRect(tx + 2, ty + 12, 8, 8);
+        this.ctx.fillRect(tx + 12, ty + 12, 18, 8);
+        this.ctx.fillRect(tx + 2, ty + 22, 18, 8);
+        this.ctx.fillRect(tx + 22, ty + 22, 8, 8);
+        
+        this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        this.ctx.fillRect(tx, ty+ts-4, ts, 4); 
+    }
+
+    drawWoodFence(tx, ty, c, r, isOpen) {
+        const ts = CONFIG.TILE_SIZE;
+        this.ctx.fillStyle = TILES.GRASS.color;
+        this.ctx.fillRect(tx, ty, ts, ts);
+        this.ctx.fillStyle = '#5C3317'; 
+        
+        if (isOpen) {
+            this.ctx.fillRect(tx, ty, 6, ts);
+            this.ctx.fillRect(tx + ts - 6, ty, 6, ts);
+        } else {
+            this.ctx.fillRect(tx + 4, ty + 4, 6, ts-4);
+            this.ctx.fillRect(tx + 22, ty + 4, 6, ts-4);
+            this.ctx.fillRect(tx, ty + 8, ts, 4);
+            this.ctx.fillRect(tx, ty + 20, ts, 4);
+            this.ctx.fillStyle = '#3E2723';
+            this.ctx.fillRect(tx + 3, ty + 2, 8, 2);
+            this.ctx.fillRect(tx + 21, ty + 2, 8, 2);
+        }
+    }
+
+    drawTower(tx, ty, color, c, r, id) {
+        const ts = CONFIG.TILE_SIZE;
+        this.ctx.fillStyle = '#222'; 
+        this.ctx.fillRect(tx, ty - 8, ts, ts + 8); 
+
+        this.ctx.fillStyle = color; 
+        this.ctx.fillRect(tx, ty, ts, ts);
+        
+        this.ctx.fillStyle = 'rgba(0,0,0,0.1)';
+        this.ctx.fillRect(tx + 4, ty + 8, ts - 8, 2);
+        this.ctx.fillRect(tx + 4, ty + 20, ts - 8, 2);
+        this.ctx.fillStyle = '#111';
+        this.ctx.fillRect(tx + ts/2 - 2, ty + 10, 4, 12);
+
+        const topY = ty - 12;
+        this.ctx.fillStyle = (id === TILES.TOWER_BASE_GOLD.id ? '#FDD835' : (id === TILES.TOWER_BASE_IRON.id ? '#555' : '#888'));
+        this.ctx.fillRect(tx - 2, topY, ts + 4, ts); 
+        
+        this.ctx.fillStyle = color;
+        this.ctx.fillRect(tx - 2, topY - 4, 6, 6);
+        this.ctx.fillRect(tx + ts - 4, topY - 4, 6, 6);
+        this.ctx.fillRect(tx - 2, topY + ts - 4, 6, 6);
+        this.ctx.fillRect(tx + ts - 4, topY + ts - 4, 6, 6);
+        
+        this.ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        this.ctx.strokeRect(tx - 2, topY, ts + 4, ts);
+
+        const cannon = this.game.cannons.find(can => can.key === `${c},${r}`);
+        if (cannon) {
+            this.ctx.fillStyle = cannon.ammo > 0 ? '#0ff' : '#f00';
+            this.ctx.font = '10px monospace';
+            this.ctx.fillText(cannon.ammo, tx + 10, ty + 20);
+        }
+    }
+
+    drawBoulder(tx, ty, c, r) {
+        this.ctx.fillStyle = TILES.GRASS.color;
+        this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+        
+        const shapeR = Utils.noise(c, r, this.game.world.seed + 777);
+        const baseColor = Utils.hsl(0, 0, 55, c, r, this.game.world.seed, 0, 10);
+        this.ctx.fillStyle = baseColor;
+
+        if (shapeR < 0.33) {
+            this.ctx.fillRect(tx + 4, ty + 4, 24, 24);
+            this.ctx.fillRect(tx + 2, ty + 8, 4, 16); 
+            this.ctx.fillRect(tx + 26, ty + 8, 4, 16);
+            this.ctx.fillRect(tx + 8, ty + 2, 16, 4); 
+            this.ctx.fillRect(tx + 8, ty + 26, 16, 4); 
+            this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            this.ctx.fillRect(tx + 8, ty + 6, 8, 4);
+            this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            this.ctx.fillRect(tx + 8, ty + 22, 16, 6);
+        } else if (shapeR < 0.66) {
+            this.ctx.fillRect(tx + 2, ty + 12, 28, 18);
+            this.ctx.fillRect(tx + 6, ty + 8, 20, 4);
+            this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            this.ctx.fillRect(tx + 6, ty + 8, 20, 2);
+            this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            this.ctx.fillRect(tx + 22, ty + 12, 8, 18);
+        } else {
+            this.ctx.fillRect(tx + 2, ty + 14, 12, 14); 
+            this.ctx.fillRect(tx + 12, ty + 6, 18, 22); 
+            this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            this.ctx.fillRect(tx + 14, ty + 6, 10, 4);
+            this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            this.ctx.fillRect(tx + 8, ty + 20, 6, 8);
+        }
+    }
+
+    drawTree(tx, ty, c, r, rowBuckets) {
+        let isOccluding = false;
+        for (let checkR = r - 2; checkR < r; checkR++) {
+            if (rowBuckets[checkR] && rowBuckets[checkR].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) isOccluding = true;
+        }
+        this.ctx.globalAlpha = isOccluding ? 0.4 : 1.0;
+        
+        this.ctx.fillStyle = '#3E2723';
+        this.ctx.fillRect(tx + 12, ty - 8, 8, 24); 
+        
+        const leafColor = Utils.hsl(120, 50, 30, c, r, this.game.world.seed, 10, 5);
+        this.ctx.fillStyle = leafColor;
+        
+        const shapeR = Utils.noise(c, r, this.game.world.seed + 555);
+        
+        if (shapeR < 0.33) {
+            this.ctx.fillRect(tx, ty - 24, 32, 24);
+            this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+            this.ctx.fillRect(tx + 4, ty - 20, 24, 16);
+        } else if (shapeR < 0.66) {
+            this.ctx.fillRect(tx + 2, ty - 16, 28, 16); 
+            this.ctx.fillRect(tx + 6, ty - 30, 20, 14); 
+            this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+            this.ctx.fillRect(tx + 8, ty - 26, 16, 22);
+        } else {
+            this.ctx.fillRect(tx - 2, ty - 20, 36, 20); 
+            this.ctx.fillRect(tx + 6, ty - 26, 20, 6); 
+            this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
+            this.ctx.fillRect(tx + 4, ty - 16, 24, 12);
+        }
+        this.ctx.globalAlpha = 1.0;
     }
 
     drawHealth(e) {
