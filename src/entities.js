@@ -108,6 +108,8 @@ export class Entity {
         this.selectedTile = null; 
         
         this.direction = { x: 0, y: 1 };
+        this.velocity = { x: 0, y: 0 };
+        
         this.isMoving = false;
         this.moveTime = 0;
         this.inBoat = false; 
@@ -116,7 +118,6 @@ export class Entity {
         this.activeRange = TILES.GREY.id; 
         this.activeMelee = 'hand';   
 
-        // Boat Physics State
         this.boatStats = {
             heading: 0,       
             speed: 0,         
@@ -126,7 +127,6 @@ export class Entity {
             cooldownRight: 0
         };
 
-        // AI State for NPCs
         this.aiState = { 
             mode: 'chase', 
             tx: 0, 
@@ -142,7 +142,6 @@ export class Entity {
 
         let fireAngle = stats.heading + (side === 'right' ? Math.PI/2 : -Math.PI/2);
         
-        // Fire Salvo of 3
         const offsets = [-10, 0, 10]; 
         offsets.forEach(off => {
             const spawnX = this.x + Math.cos(stats.heading) * off;
@@ -174,56 +173,84 @@ export class Entity {
         if (side === 'right') stats.cooldownRight = cd;
     }
 
+    // [MODIFIED] Removed Low-Speed Steering Threshold
     updateBoatMovement(input, dt, world) {
         const stats = this.boatStats;
         const cfg = CONFIG.BOAT;
-        const wind = world.wind;
 
         if (stats.cooldownLeft > 0) stats.cooldownLeft--;
         if (stats.cooldownRight > 0) stats.cooldownRight--;
 
-        if (input.up) stats.sailLevel = 1; 
-        else if (input.down) stats.sailLevel = -0.5; 
-        else stats.sailLevel = 0; 
-
+        // 1. RUDDER PHYSICS
+        // Removed currentSpeed threshold. Steer efficiency is always 100%
         if (input.left) stats.rudder -= cfg.RUDDER_SPEED;
         if (input.right) stats.rudder += cfg.RUDDER_SPEED;
 
         if (stats.rudder > cfg.MAX_RUDDER) stats.rudder = cfg.MAX_RUDDER;
         if (stats.rudder < -cfg.MAX_RUDDER) stats.rudder = -cfg.MAX_RUDDER;
         
-        if (!input.left && !input.right) {
-            stats.rudder *= 0.9;
+        if (!input.left && !input.right) stats.rudder *= 0.95;
+
+        if (Math.abs(stats.rudder) > 0.001) {
+            // Maintained the reduced turn rate (0.25) for heavy feel
+            stats.heading += stats.rudder * (cfg.TURN_FACTOR * 0.25);
         }
 
-        let windEfficiency = 1.0;
+        // 2. WIND & SAIL PHYSICS (POLAR DIAGRAM)
+        const windDot = Math.cos(world.wind.angle - stats.heading);
+        let windEfficiency = 0;
+        
+        if (windDot < -0.8) {
+             windEfficiency = (windDot + 1.0); 
+        } else {
+             windEfficiency = (0.5 + 0.5 * windDot) + (0.5 * (1 - Math.abs(windDot)));
+        }
+        windEfficiency = Math.max(0, windEfficiency);
+
+        if (input.up) stats.sailLevel = Math.min(1, stats.sailLevel + 0.02);
+        else if (input.down) stats.sailLevel = Math.max(-0.25, stats.sailLevel - 0.05); 
+
+        // Apply Forces
+        let powerFactor = 0.40; 
+        
+        let effectiveThrust = 0;
         if (stats.sailLevel > 0) {
-            const angleDiff = stats.heading - wind.angle;
-            const cos = Math.cos(angleDiff); 
-            const normalized = (cos + 1) / 2; 
-            windEfficiency = 0.2 + (normalized * 1.0);
+            effectiveThrust = stats.sailLevel * cfg.ACCELERATION * powerFactor * windEfficiency;
+        } else {
+            effectiveThrust = stats.sailLevel * cfg.ACCELERATION * 0.2; 
+        }
+        
+        const accX = Math.cos(stats.heading) * effectiveThrust;
+        const accY = Math.sin(stats.heading) * effectiveThrust;
+
+        this.velocity.x += accX;
+        this.velocity.y += accY;
+
+        // 3. DRAG & KEEL
+        this.velocity.x *= 0.995; 
+        this.velocity.y *= 0.995;
+
+        const speed = Math.sqrt(this.velocity.x**2 + this.velocity.y**2);
+        if (speed > 0.001) {
+            const moveAngle = Math.atan2(this.velocity.y, this.velocity.x);
+            const angleDiff = moveAngle - stats.heading;
+
+            const forwardSpeed = Math.cos(angleDiff) * speed;
+            const lateralSpeed = Math.sin(angleDiff) * speed;
+
+            const newForward = forwardSpeed; 
+            const newLateral = lateralSpeed * 0.90; 
+
+            this.velocity.x = Math.cos(stats.heading) * newForward + Math.cos(stats.heading + Math.PI/2) * newLateral;
+            this.velocity.y = Math.sin(stats.heading) * newForward + Math.sin(stats.heading + Math.PI/2) * newLateral;
         }
 
-        let targetSpeed = stats.sailLevel * cfg.MAX_SPEED * windEfficiency;
+        // 4. MOVE
+        const pixelScale = 15; 
+        this.move(this.velocity.x * pixelScale, this.velocity.y * pixelScale, world);
         
-        if (stats.speed < targetSpeed) stats.speed += cfg.ACCELERATION;
-        else if (stats.speed > targetSpeed) stats.speed -= cfg.DECELERATION;
-
-        if (stats.sailLevel === 0) stats.speed *= 0.98;
-
-        const velocityRatio = Math.abs(stats.speed) / cfg.MAX_SPEED;
-        const turnAmount = stats.rudder * (0.2 + (velocityRatio * cfg.TURN_FACTOR));
-        
-        if (Math.abs(stats.speed) > 0.1) {
-             stats.heading += turnAmount;
-        }
-
-        const dx = Math.cos(stats.heading) * stats.speed;
-        const dy = Math.sin(stats.heading) * stats.speed;
-
-        this.move(dx, dy, world);
-        
-        this.isMoving = Math.abs(stats.speed) > 0.1;
+        stats.speed = Math.sqrt(this.velocity.x**2 + this.velocity.y**2) * pixelScale;
+        this.isMoving = stats.speed > 0.1;
     }
 
     move(dx, dy, world) {
@@ -234,7 +261,7 @@ export class Entity {
             const gy = Math.floor(ty / CONFIG.TILE_SIZE);
             const tileId = world.getTile(gx, gy);
             
-            if (this.inBoat) {
+            if (this.inBoat || this.type === 'boat') {
                 if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return true;
                 return false; 
             } else {
@@ -257,13 +284,15 @@ export class Entity {
         let collided = false;
 
         if (verify(attemptedX, this.y)) this.x = attemptedX;
-        else collided = true;
+        else {
+            collided = true;
+            this.velocity.x *= -0.5; // Bounce
+        }
 
         if (verify(this.x, attemptedY)) this.y = attemptedY;
-        else collided = true;
-
-        if (collided && this.inBoat) {
-            this.boatStats.speed *= 0.5;
+        else {
+            collided = true;
+            this.velocity.y *= -0.5; // Bounce
         }
 
         if (dx !== 0 || dy !== 0) {
@@ -333,7 +362,6 @@ export class Boat extends Entity {
         this.respawnTimer = 0;
         this.nextRespawnTime = 0; 
         
-        // 30 seconds (1800 frames) to 5 minutes (18000 frames)
         this.travelTimer = (this.owner === 'enemy') ? 1800 + Math.random() * 16200 : 0;
     }
 
@@ -346,16 +374,11 @@ export class Boat extends Entity {
         const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
 
         if (!this.isLanded && isWater) {
-            
-            // Check travel timer
-            if (this.travelTimer > 0) {
-                this.travelTimer--;
-            }
+            if (this.travelTimer > 0) this.travelTimer--;
 
             const dist = Utils.distance(this, player);
             const input = { up: false, down: false, left: false, right: false };
             
-            // --- STEERING LOGIC ---
             const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
             let heading = this.boatStats.heading % (Math.PI * 2);
             if (heading > Math.PI) heading -= Math.PI * 2;
@@ -364,15 +387,13 @@ export class Boat extends Entity {
             let desiredAngle = angleToPlayer;
 
             if (this.travelTimer > 0) {
-                // PATROL MODE: Circle player or keep distance
                 desiredAngle = angleToPlayer + Math.PI / 2;
                 if (dist > 600) desiredAngle = angleToPlayer + Math.PI / 4;
             } else {
-                // INVASION/ATTACK MODE
                 if (dist < CONFIG.BOAT.ENEMY_ENGAGE_RANGE) {
-                    desiredAngle = angleToPlayer + Math.PI / 2; // Flank to fire
+                    desiredAngle = angleToPlayer + Math.PI / 2; 
                 } else {
-                    desiredAngle = angleToPlayer; // Chase
+                    desiredAngle = angleToPlayer; 
                 }
             }
 
@@ -385,12 +406,11 @@ export class Boat extends Entity {
                 else input.left = true;
             }
 
-            if (Math.abs(diff) < 1.0) input.up = true;
-            else input.up = true; 
+            if (Math.abs(diff) < 1.0 && dist > 100) input.up = true;
+            else if (dist < 100) input.down = true; 
 
             this.updateBoatMovement(input, dt, world);
 
-            // --- FIRING LOGIC ---
             const angleToTarget = Math.atan2(player.y - this.y, player.x - this.x);
             let angleRelative = angleToTarget - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
@@ -432,7 +452,6 @@ export class Boat extends Entity {
                 }
             }
         } else {
-            // Transition from Water to Land (Beaching)
             const angle = Math.atan2(player.y - this.y, player.x - this.x);
             const prevX = this.x;
             const prevY = this.y;

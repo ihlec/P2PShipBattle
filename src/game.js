@@ -45,7 +45,7 @@ export default class Game {
         
         this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
 
-        this.camera = { x: 0, y: 0 };
+        this.camera = { x: 0, y: 0, angle: 0 };
         this.zoom = 1;
         this.lastTime = 0;
         this.regenTimer = 0;
@@ -70,13 +70,13 @@ export default class Game {
             bpName: document.getElementById('current-bp-name'),
             wpName: document.getElementById('current-weapon-name'),
             elev: document.getElementById('elev-disp'),
-            biome: document.getElementById('biome-disp') 
+            biome: document.getElementById('biome-disp'),
+            needle: document.getElementById('compass-needle')
         };
         
         this.dom.seed.innerText = this.world.seed;
         
         // --- INITIALIZE RENDERER ---
-        // We pass 'this' so the renderer can access entities/world/camera
         this.renderer = new Renderer(this, this.canvas);
 
         document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
@@ -425,8 +425,26 @@ export default class Game {
     handleInteraction() {
         if (!this.input.mouse.clickedLeft && !this.input.mouse.clickedRight) return;
 
-        const mx = (this.input.mouse.x / this.zoom) + this.camera.x;
-        const my = (this.input.mouse.y / this.zoom) + this.camera.y;
+        // [MODIFIED] MOUSE POS CALC FOR ROTATED CAMERA
+        // The raw mouse input is screen coordinates relative to top-left.
+        // We need to reverse the camera transform to get World Coordinates.
+        
+        // 1. Center coords
+        const cx = this.input.mouse.x - (this.canvas.width / 2);
+        const cy = this.input.mouse.y - (this.canvas.height / 2);
+        
+        // 2. Un-Rotate
+        const ang = -this.camera.angle;
+        const rx = cx * Math.cos(ang) - cy * Math.sin(ang);
+        const ry = cx * Math.sin(ang) + cy * Math.cos(ang);
+        
+        // 3. Un-Zoom
+        const wx = (rx / this.zoom) + this.player.x;
+        const wy = (ry / this.zoom) + this.player.y;
+
+        const mx = wx;
+        const my = wy;
+        
         const gx = Math.floor(mx / CONFIG.TILE_SIZE);
         const gy = Math.floor(my / CONFIG.TILE_SIZE);
 
@@ -521,14 +539,14 @@ export default class Game {
                     }
                 }
 
-                if (occupied) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
+                if (occupied) { this.spawnText(mx, my, "OCCUPIED", "#f00"); return; }
 
                 if (affordable) {
                     if (this.activeBlueprint.special === 'boat') {
                         const targetId = this.world.getTile(gx, gy);
                         const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id, TILES.SAND.id];
                         if (!allowed.includes(targetId)) {
-                            this.spawnText(mx * this.zoom, my * this.zoom, "INVALID LOCATION", "#f00");
+                            this.spawnText(mx, my, "INVALID LOCATION", "#f00");
                             return;
                         }
                         
@@ -544,12 +562,12 @@ export default class Game {
                     if (this.activeBlueprint.special === 'bridge') {
                         const targetId = this.world.getTile(gx, gy);
                         if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id && targetId !== TILES.WOOD_RAIL.id) {
-                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER/RAIL", "#f00"); return;
+                             this.spawnText(mx, my, "MUST BUILD ON WATER/RAIL", "#f00"); return;
                         }
                     } else if (this.activeBlueprint.requiresWater) {
                         const targetId = this.world.getTile(gx, gy);
                         if (targetId !== TILES.WATER.id && targetId !== TILES.DEEP_WATER.id) {
-                             this.spawnText(mx * this.zoom, my * this.zoom, "MUST BUILD ON WATER", "#f00"); return;
+                             this.spawnText(mx, my, "MUST BUILD ON WATER", "#f00"); return;
                         }
                     }
                     
@@ -576,7 +594,7 @@ export default class Game {
                     }
                 }
             } else {
-                if (isOccupied(gx, gy)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
+                if (isOccupied(gx, gy)) { this.spawnText(mx, my, "OCCUPIED", "#f00"); return; }
                 const id = this.player.selectedTile;
                 if (canAfford(id, 1)) {
                     if (this.tryBuild(gx, gy, id, false, false)) {
@@ -745,7 +763,7 @@ export default class Game {
                 }
 
                 if (tileId === TILES.GREY.id || tileId === TILES.WOOD_RAIL.id) {
-                    if (isOccupied(tx, ty)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
+                    if (isOccupied(tx, ty)) { this.spawnText(mx, my, "OCCUPIED", "#f00"); return; }
                     const biome = Utils.getBiome(tx, ty, this.world.seed);
                     let restoreId = (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) ? biome : TILES.GRASS.id;
                     if (biome === TILES.SAND.id) restoreId = TILES.SAND.id;
@@ -815,6 +833,29 @@ export default class Game {
             this.zoom = Math.max(0.3, Math.min(this.zoom - this.input.wheel * 0.001, 3));
         }
         
+        // [NEW] Camera Rotation Logic
+        let targetAngle = 0;
+        if (this.player.inBoat) {
+            // Target the boat's heading + 90 degrees (so North/Up is forward)
+            // Wait, PI/2 is 90 degrees.
+            // Boat heading 0 = East. 
+            // We want Boat 0 to point UP (-PI/2 on screen).
+            // So we rotate context by -PI/2. 
+            // Formula: -Heading - PI/2
+            targetAngle = -this.player.boatStats.heading - Math.PI/2;
+        }
+        
+        this.camera.angle = Utils.lerpAngle(this.camera.angle, targetAngle, 0.05);
+        
+        // Update Compass Needle
+        // Needle points to World North (0 heading).
+        // Since camera is rotated by this.camera.angle, the world is rotated by that amount.
+        // To point North, needle must rotate opposite to camera.
+        const deg = (this.camera.angle * 180 / Math.PI);
+        if (this.dom.needle) {
+            this.dom.needle.style.transform = `translateX(-50%) rotate(${-deg}deg)`;
+        }
+
         this.world.update(dt);
         this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle));
 
@@ -847,6 +888,18 @@ export default class Game {
             if(inputState.left) dx = -1;
             if(inputState.right) dx = 1;
             
+            // Adjust input for camera rotation when walking on land (optional, but good for UX)
+            // If camera is still rotating back to 0, inputs might feel skewed.
+            // Ideally inputs are relative to camera.
+            if (this.camera.angle !== 0) {
+               const cos = Math.cos(-this.camera.angle);
+               const sin = Math.sin(-this.camera.angle);
+               const ndx = dx * cos - dy * sin;
+               const ndy = dx * sin + dy * cos;
+               dx = ndx;
+               dy = ndy;
+            }
+            
             if (dx || dy) {
                 this.player.isMoving = true; 
                 this.player.moveTime += dt;  
@@ -857,10 +910,11 @@ export default class Game {
             }
         }
 
-        const viewW = this.canvas.width / this.zoom;
-        const viewH = this.canvas.height / this.zoom;
-        this.camera.x = this.player.x - viewW/2;
-        this.camera.y = this.player.y - viewH/2;
+        // Camera XY is now centered on player by the renderer transform, 
+        // but we still track it for logical consistency or culling if needed.
+        // We actually don't use camera.x/y for the renderer transform anymore (it uses player.x/y).
+        this.camera.x = this.player.x - (this.canvas.width/this.zoom)/2;
+        this.camera.y = this.player.y - (this.canvas.height/this.zoom)/2;
 
         this.handleInteraction();
 

@@ -21,6 +21,15 @@ export default class Utils {
     }
 
     static lerp(a, b, t) { return a + t * (b - a); }
+    
+    // [NEW] Handles angular interpolation (0 to 360 wrap around)
+    static lerpAngle(a, b, t) {
+        let diff = b - a;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        return a + diff * t;
+    }
+
     static smoothstep(t) { return t * t * (3 - 2 * t); }
 
     static valueNoise2D(x, y, seed) {
