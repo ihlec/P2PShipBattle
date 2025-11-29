@@ -1,32 +1,50 @@
 import Game from './game.js';
 
 window.onload = () => {
-    // Check if the menu elements exist (they should be in index.html)
     const hostBtn = document.getElementById('btn-host');
+    const loadHostBtn = document.getElementById('btn-load-host');
     const joinBtn = document.getElementById('btn-join');
     const roomInput = document.getElementById('room-input');
+    const nameInput = document.getElementById('name-input');
     const menu = document.getElementById('main-menu');
 
-    if (hostBtn && joinBtn && roomInput && menu) {
+    // Default Name
+    nameInput.value = "Player" + Math.floor(Math.random()*100);
+
+    const getRoomId = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    if (hostBtn) {
+        // 1. HOST NEW
         hostBtn.onclick = () => {
-            // Generate a random 4-char room ID
-            const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
+            const roomId = getRoomId();
+            const name = nameInput.value || "Host";
             menu.style.display = 'none';
-            // Start game as Host
-            window.game = new Game(roomId, true);
+            window.game = new Game(roomId, true, name, null); // Null = No save data
             alert(`Room Created! Share Code: ${roomId}`);
         };
 
+        // 2. HOST LOAD
+        loadHostBtn.onclick = () => {
+            const json = localStorage.getItem('pixelWarfareSave');
+            if (!json) return alert("No Save Found!");
+            
+            const roomId = getRoomId();
+            const name = nameInput.value || "Host";
+            const saveData = JSON.parse(json);
+            
+            menu.style.display = 'none';
+            window.game = new Game(roomId, true, name, saveData);
+            alert(`Game Loaded! Share Code: ${roomId}`);
+        };
+
+        // 3. JOIN
         joinBtn.onclick = () => {
             const roomId = roomInput.value.toUpperCase();
+            const name = nameInput.value || "Guest";
             if (roomId.length < 2) return alert("Invalid Room ID");
+            
             menu.style.display = 'none';
-            // Start game as Client
-            window.game = new Game(roomId, false);
+            window.game = new Game(roomId, false, name, null);
         };
-    } else {
-        // Fallback if UI fails to load
-        console.error("Menu elements not found");
-        new Game("TEST", true);
     }
 };

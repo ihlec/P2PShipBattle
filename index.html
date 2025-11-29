@@ -10,18 +10,28 @@
 
     <div id="main-menu" style="position:absolute; top:0; left:0; z-index:9999; width:100%; height:100%; background:#111; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#eee; font-family:monospace;">
         <h1 style="color:#ffd700; text-shadow:2px 2px #000; font-size: 40px; margin-bottom: 20px;">PIXEL WARFARE</h1>
-        <div style="background:#222; padding:30px; border:2px solid #555; text-align:center; border-radius: 8px; box-shadow: 0 0 20px #000;">
-            <h3 style="margin-top:0;">MULTIPLAYER LOBBY</h3>
-            <button id="btn-host" class="ui-btn" style="font-size:18px; padding:15px 30px; margin:10px; display:block; width:100%;">HOST NEW GAME</button>
-            <div style="margin:15px; color:#777;">- OR -</div>
+        
+        <div style="background:#222; padding:30px; border:2px solid #555; text-align:center; border-radius: 8px; box-shadow: 0 0 20px #000; width: 350px;">
+            <input id="name-input" type="text" placeholder="ENTER PLAYER NAME" maxlength="10" style="padding:10px; font-size:16px; text-align:center; background:#000; color:#0f0; border:1px solid #555; width: 100%; box-sizing: border-box; margin-bottom: 20px;">
+            
+            <h3 style="margin-top:0; border-bottom:1px solid #444; padding-bottom:10px;">HOST GAME</h3>
+            <div style="display:flex; gap:10px;">
+                <button id="btn-host" class="ui-btn" style="flex:1; font-size:14px; padding:10px;">NEW WORLD</button>
+                <button id="btn-load-host" class="ui-btn" style="flex:1; font-size:14px; padding:10px; color:#ffd700;">LOAD</button>
+            </div>
+
+            <h3 style="margin-top:20px; border-bottom:1px solid #444; padding-bottom:10px;">JOIN GAME</h3>
             <input id="room-input" type="text" placeholder="ENTER ROOM CODE" style="padding:10px; font-size:16px; text-transform:uppercase; text-align:center; background:#000; color:#fff; border:1px solid #555; width: 100%; box-sizing: border-box;">
-            <button id="btn-join" class="ui-btn" style="font-size:18px; padding:15px 30px; margin:10px; display:block; width:100%;">JOIN GAME</button>
+            <button id="btn-join" class="ui-btn" style="font-size:18px; padding:15px 30px; margin:10px 0 0 0; display:block; width:100%;">JOIN</button>
         </div>
         <div style="margin-top: 20px; color: #555;">P2P Mesh via Trystero</div>
     </div>
 
     <div id="ui-layer">
         <div class="stat-box">
+            <div style="color:#ffd700; border-bottom:1px solid #555; margin-bottom:5px; padding-bottom:5px;">
+                Room: <span id="room-id-disp">---</span>
+            </div>
             <div>Health: <span id="hp">100</span></div>
             <div>Pos: <span id="coords">0, 0</span></div>
             <div>Biome: <span id="biome-disp"></span></div>
@@ -37,8 +47,7 @@
             </div>
             <div style="margin-top:5px; padding-top:5px; border-top:1px solid #555;">
                 <button id="btn-save" class="ui-btn">SAVE</button>
-                <button id="btn-load" class="ui-btn">LOAD</button>
-            </div>
+                </div>
         </div>
     </div>
 
