@@ -105,7 +105,6 @@ export default class Network {
                 if (data.type === 'build') {
                     if (this.game.tryBuild(data.x, data.y, data.id, false, false, true)) {
                         this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
-                        // [FIX] Update Host's cannon list immediately after authorizing a build
                         this.game.recalcCannons(); 
                     }
                 } else if (data.type === 'remove') {
@@ -114,7 +113,6 @@ export default class Network {
                      
                      this.game.world.setTile(data.x, data.y, data.id); 
                      this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
-                     // [FIX] Update Host's cannon list after removal (e.g. destroying a tower)
                      this.game.recalcCannons();
                 }
             }
@@ -183,7 +181,6 @@ export default class Network {
                         cannon.ammo += 5;
                         this.game.spawnParticles(cannon.x, cannon.y, '#00ffff', 5);
                     } else {
-                        // Fallback: If cannon not found, try forcing a recalc and checking again
                         this.game.recalcCannons();
                         const retry = this.game.cannons.find(c => c.key === data.id);
                         if(retry) {
@@ -221,20 +218,25 @@ export default class Network {
                 else if (type === 'loot') entity = { uid: d.i, x: d.x, y: d.y, id: d.t, qty: d.q, bob: Math.random()*100 };
                 else entity = new Entity(d.x, d.y, 'npc');
                 
-                if (!isLoot) entity.id = d.i;
+                if (!isLoot) {
+                    entity.id = d.i;
+                    // [NEW] Set initial targets to avoid interpolation jump
+                    entity.targetX = d.x;
+                    entity.targetY = d.y;
+                }
                 localList.push(entity);
             }
             
             if (isLoot) return; 
 
-            const dx = d.x - entity.x;
-            const dy = d.y - entity.y;
+            // [NEW] Update Targets instead of Position
+            entity.targetX = d.x;
+            entity.targetY = d.y;
             
-            if (Math.abs(dx) > 100 || Math.abs(dy) > 100) {
-                entity.x = d.x; entity.y = d.y;
-            } else {
-                entity.x += dx * 0.2;
-                entity.y += dy * 0.2;
+            // Snap if distance is too great
+            if (Math.abs(d.x - entity.x) > 100 || Math.abs(d.y - entity.y) > 100) {
+                entity.x = d.x;
+                entity.y = d.y;
             }
             
             entity.hp = d.h;
@@ -242,12 +244,13 @@ export default class Network {
             if (type === 'sheep') {
                 entity.fed = d.f;
                 entity.hasWool = d.w;
-                entity.isMoving = (Math.abs(dx) > 1 || Math.abs(dy) > 1);
+                entity.isMoving = (Math.abs(entity.targetX - entity.x) > 1 || Math.abs(entity.targetY - entity.y) > 1);
             } else if (type === 'boat') {
-                if (d.bs) entity.boatStats.heading = d.bs.h;
+                // [NEW] Update Heading Target
+                if (d.bs) entity.boatStats.targetHeading = d.bs.h;
                 if (d.o) entity.owner = d.o; 
             } else if (type === 'npc') {
-                entity.isMoving = (Math.abs(dx) > 1 || Math.abs(dy) > 1);
+                entity.isMoving = (Math.abs(entity.targetX - entity.x) > 1 || Math.abs(entity.targetY - entity.y) > 1);
             }
         });
 
@@ -301,7 +304,6 @@ export default class Network {
             this.game.world.setTile(gx, gy, restoreId);
             this.actions.sendTileUpd({ x: gx, y: gy, id: restoreId, action: 'set' });
             
-            // [FIX] Recalc cannons if host removes tower locally
             this.game.recalcCannons();
         } else {
             this.actions.sendTileReq({ x: gx, y: gy, id: restoreId, type: 'remove' });

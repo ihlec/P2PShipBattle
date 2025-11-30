@@ -750,6 +750,25 @@ export default class Game {
         this.handleInteraction();
         this.updateMeleeCombat(); 
 
+        // [NEW] Interpolation for entities (Client side only)
+        if (!this.network.isHost) {
+            const lerpEntity = (e) => {
+                if (e.targetX === undefined || e.targetY === undefined) return;
+                const dx = e.targetX - e.x;
+                const dy = e.targetY - e.y;
+                e.x += dx * 0.15; // Smooth factor
+                e.y += dy * 0.15;
+                
+                // Lerp rotation for boats
+                if (e.boatStats && e.boatStats.targetHeading !== undefined) {
+                    e.boatStats.heading = Utils.lerpAngle(e.boatStats.heading, e.boatStats.targetHeading, 0.1);
+                }
+            };
+            this.npcs.forEach(lerpEntity);
+            this.animals.forEach(lerpEntity);
+            this.boats.forEach(lerpEntity);
+        }
+
         if (this.network.isHost) {
              const enemyBoat = this.boats.find(b => b.owner === 'enemy');
              if (!enemyBoat) {

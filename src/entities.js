@@ -1,6 +1,6 @@
 import { CONFIG, TILES } from './config.js';
 import Utils from './utils.js';
-import { WakeParticle } from './particles.js'; // Import needed for Boat
+import { WakeParticle } from './particles.js'; 
 
 export class Projectile {
     constructor(x, y, tx, ty, damage, speed, color, isPlayerOwner, type = 'stone') {
@@ -52,7 +52,13 @@ export class Projectile {
 export class Entity {
     constructor(x, y, type) {
         this.id = Math.random().toString(36).substr(2, 9);
-        this.x = x; this.y = y; this.type = type;
+        this.x = x; 
+        this.y = y; 
+        // [NEW] Interpolation Targets
+        this.targetX = x;
+        this.targetY = y;
+        
+        this.type = type;
         this.speed = CONFIG.PLAYER_SPEED_BASE;
         this.hp = 100;
         this.maxHp = 100; 
@@ -67,7 +73,17 @@ export class Entity {
         this.equippedWeapon = null; 
         this.activeRange = TILES.GREY.id; 
         this.activeMelee = 'hand';   
-        this.boatStats = { heading: 0, speed: 0, rudder: 0, sailLevel: 0, cooldownLeft: 0, cooldownRight: 0 };
+        
+        this.boatStats = { 
+            heading: 0, 
+            targetHeading: 0, // [NEW] Interpolation Target for Rotation
+            speed: 0, 
+            rudder: 0, 
+            sailLevel: 0, 
+            cooldownLeft: 0, 
+            cooldownRight: 0 
+        };
+        
         this.aiState = { mode: 'chase', tackState: 1, tackTimer: 0 };
     }
     
