@@ -71,9 +71,6 @@ export default class Network {
                     time: data.time
                 });
                 
-                // [FIXED] Removed direct DOM access to this.game.dom.seed.innerText 
-                // The UIManager loop will handle the display now that the data is imported.
-
                 if (data.spawnX && data.spawnY) {
                     const offsetX = (Math.random() - 0.5) * 128;
                     const offsetY = (Math.random() - 0.5) * 128;
@@ -109,6 +106,10 @@ export default class Network {
                         this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
                     }
                 } else if (data.type === 'remove') {
+                     // [NEW] Host handles loot spawning for client actions
+                     const currentId = this.game.world.getTile(data.x, data.y);
+                     this.game.spawnTileLoot(data.x, data.y, currentId);
+                     
                      this.game.world.setTile(data.x, data.y, data.id); 
                      this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
                 }
@@ -147,7 +148,7 @@ export default class Network {
                         sheep.hasWool = false;
                         sheep.woolTimer = 36000;
                         this.game.loot.push({
-                            id: Math.random().toString(36).substr(2,9),
+                            uid: Math.random().toString(36).substr(2,9),
                             x: sheep.x, y: sheep.y, 
                             id: TILES.WOOL.id, qty: 1, bob: Math.random()*100
                         });
@@ -160,7 +161,7 @@ export default class Network {
                         this.game.spawnParticles(sheep.x, sheep.y, '#ff00ff', 5);
                     }
                 } else if (data.act === 'pickup') {
-                    const idx = this.game.loot.findIndex(l => l.id === data.id);
+                    const idx = this.game.loot.findIndex(l => l.uid === data.id);
                     if (idx !== -1) this.game.loot.splice(idx, 1);
                 }
             }
@@ -183,18 +184,21 @@ export default class Network {
         const incomingIds = new Set(dataList.map(e => e.i));
 
         dataList.forEach(d => {
-            let entity = localList.find(e => e.id === d.i);
+            // [FIXED] For loot, we check against UID. For entities, we check against ID.
+            const isLoot = (type === 'loot');
+            let entity = localList.find(e => (isLoot ? e.uid : e.id) === d.i);
+            
             if (!entity) {
                 if (type === 'sheep') entity = new Sheep(d.x, d.y);
                 else if (type === 'boat') entity = new Boat(d.x, d.y, d.o);
-                else if (type === 'loot') entity = { id: d.i, x: d.x, y: d.y, id: d.t, qty: d.q, bob: Math.random()*100 };
+                else if (type === 'loot') entity = { uid: d.i, x: d.x, y: d.y, id: d.t, qty: d.q, bob: Math.random()*100 };
                 else entity = new Entity(d.x, d.y, 'npc');
                 
-                if (type !== 'loot') entity.id = d.i;
+                if (!isLoot) entity.id = d.i;
                 localList.push(entity);
             }
             
-            if (type === 'loot') return; 
+            if (isLoot) return; 
 
             const dx = d.x - entity.x;
             const dy = d.y - entity.y;
@@ -221,7 +225,9 @@ export default class Network {
         });
 
         for (let i = localList.length - 1; i >= 0; i--) {
-            if (localList[i].id && !incomingIds.has(localList[i].id)) {
+            // [FIXED] Check UID for loot, ID for entities
+            const currentId = (type === 'loot') ? localList[i].uid : localList[i].id;
+            if (currentId && !incomingIds.has(currentId)) {
                 localList.splice(i, 1);
             }
         }
@@ -247,7 +253,9 @@ export default class Network {
                  const n = this.game.npcs.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp }));
                  const a = this.game.animals.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
                  const b = this.game.boats.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
-                 const l = this.game.loot.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), t: e.id, q: e.qty }));
+                 
+                 // [FIXED] Map loot to include UID as 'i' and Item Type as 't'
+                 const l = this.game.loot.map(e => ({ i: e.uid, x: Math.round(e.x), y: Math.round(e.y), t: e.id, q: e.qty }));
 
                  this.actions.sendEnts({ n, a, b, l });
              }
@@ -261,6 +269,10 @@ export default class Network {
 
     requestRemove(gx, gy, restoreId) {
         if (this.isHost) {
+            // [NEW] Host handles loot spawning for local actions
+            const currentId = this.game.world.getTile(gx, gy);
+            this.game.spawnTileLoot(gx, gy, currentId);
+            
             this.game.world.setTile(gx, gy, restoreId);
             this.actions.sendTileUpd({ x: gx, y: gy, id: restoreId, action: 'set' });
         } else {

@@ -13,32 +13,25 @@ export default class Game {
         this.canvas = document.getElementById('gameCanvas');
         this.input = new InputHandler(this);
         
-        // --- MULTIPLAYER INIT ---
         this.world = new World(); 
         this.network = new Network(this, roomId, isHost, playerName);
         this.peers = {}; 
         this.spawnPoint = {x: 0, y: 0};
         
-        // --- MAP GENERATION / LOADING ---
         let validSpawn = {x: 0, y: 0};
         
         if (isHost) {
             if (loadData) {
-                // LOAD FROM SAVE
                 this.world.importData(loadData.world);
                 validSpawn = { x: loadData.player.x, y: loadData.player.y };
                 console.log("Loaded Saved Game");
             } else {
-                // GENERATE NEW
                 let attempts = 0;
                 let spawn = null;
                 while (!spawn && attempts < 20) {
                     this.world = new World(); 
                     spawn = this.findSafeSpawn();
-                    if (!spawn) {
-                        console.log("Map rejected. Regenerating...");
-                        attempts++;
-                    }
+                    if (!spawn) attempts++;
                 }
                 if (spawn) validSpawn = spawn;
                 else {
@@ -55,7 +48,6 @@ export default class Game {
 
         this.player = new Entity(validSpawn.x, validSpawn.y, 'player');
         
-        // RESTORE PLAYER STATS
         if (loadData && isHost) {
             this.player.hp = loadData.player.hp;
             this.player.inventory = loadData.player.inventory;
@@ -72,7 +64,6 @@ export default class Game {
         this.animals = []; 
         this.boats = []; 
         
-        // RESTORE BOATS
         if (loadData && isHost && loadData.boats) {
             this.boats = loadData.boats.map(b => {
                 const boat = new Boat(b.x, b.y, b.owner || 'player');
@@ -100,7 +91,7 @@ export default class Game {
         this.invasionTimer = (loadData && loadData.invasion) ? (loadData.invasion.timer || 0) : 0;
         this.nextInvasionTime = (loadData && loadData.invasion) ? (loadData.invasion.next || 0) : 0; 
         
-        this.ui = new UIManager(this); // Init UI Manager
+        this.ui = new UIManager(this); 
 
         this.renderer = new Renderer(this, this.canvas);
 
@@ -250,6 +241,39 @@ export default class Game {
         this.shootCooldown = 30;
         if (type === 'stone') this.spawnParticles(this.player.x, this.player.y, '#aaa', 3);
         this.ui.update();
+    }
+
+    // [FIXED] Uses 'uid' for Network ID to avoid collision with 'id' (Item Type)
+    spawnTileLoot(gx, gy, tileId) {
+        const tx = gx * CONFIG.TILE_SIZE + 16;
+        const ty = gy * CONFIG.TILE_SIZE + 16;
+        const lootList = this.loot;
+        const push = (id, qty) => lootList.push({
+            uid: Math.random().toString(36).substr(2,9), 
+            x: tx, y: ty, id: id, qty: qty, bob: Math.random()*100
+        });
+
+        if (tileId === TILES.TREE.id) {
+            push(TILES.WOOD.id, 3);
+            if (Math.random() < 0.1) push(TILES.GREENS.id, 1);
+            return;
+        }
+
+        if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
+            push(TILES.GREY.id, 3);
+            if (Math.random() < 0.1) push(TILES.IRON.id, 2);
+            if (Math.random() < 0.01) push(TILES.GOLD.id, 1);
+            return;
+        }
+
+        const tileDef = ID_TO_TILE[tileId];
+        if (tileDef.isTower || tileId === TILES.WALL.id) {
+            push(TILES.GREY.id, tileDef.isTower ? 4 : 1);
+        } else if (tileId === TILES.WOOD_WALL.id || tileId === TILES.WOOD_WALL_OPEN.id || tileId === TILES.TORCH.id || tileId === TILES.WOOD_RAIL.id) {
+            push(TILES.WOOD.id, 1);
+        } else if ([TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, TILES.WOOD.id, TILES.GREENS.id, TILES.WOOL.id].includes(tileId)) {
+            push(tileId, 1);
+        }
     }
 
     handleInteraction() {
@@ -455,7 +479,7 @@ export default class Game {
                     clickedSheep.hasWool = false;
                     clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME;
                     this.loot.push({
-                        id: Math.random().toString(36).substr(2,9),
+                        uid: Math.random().toString(36).substr(2,9),
                         x: clickedSheep.x, y: clickedSheep.y, 
                         id: TILES.WOOL.id, qty: 1, bob: Math.random()*100
                     });
@@ -529,8 +553,7 @@ export default class Game {
                 if (tileId === TILES.TREE.id) {
                     this.network.requestRemove(tx, ty, TILES.GRASS.id);
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
-                    this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
-                    if (Math.random() < 0.1) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
+                    // [MODIFIED] Removed client-side push. Host handles loot via spawnTileLoot.
                     return;
                 }
 
@@ -549,20 +572,7 @@ export default class Game {
                         this.network.requestRemove(tx, ty, restoreId);
                         
                         this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
-                        
-                        if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
-                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 3, bob: Math.random()*100});
-                             if (Math.random() < 0.1) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
-                             if (Math.random() < 0.01) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
-                        } else if (tileDef.isTower) {
-                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 4, bob: Math.random()*100});
-                        } else if (tileId === TILES.WOOD_WALL.id || tileId === TILES.WOOD_WALL_OPEN.id) {
-                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
-                        } else if (tileId === TILES.WALL.id) {
-                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 1, bob: Math.random()*100});
-                        } else if (tileId === TILES.TORCH.id) {
-                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
-                        }
+                        // [MODIFIED] Removed client-side push. Host handles loot via spawnTileLoot.
                         
                         this.recalcCannons();
                         this.ui.update();
@@ -580,14 +590,7 @@ export default class Game {
                     this.network.requestRemove(tx, ty, restoreId);
                     
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#777', 5);
-                    
-                    if (removable.includes(tileId)) {
-                        this.player.inventory[tileId] = (this.player.inventory[tileId] || 0) + 1;
-                        this.spawnText(tx*CONFIG.TILE_SIZE + 16, ty*CONFIG.TILE_SIZE, `+1 ${ID_TO_TILE[tileId].short}`, "#fff");
-                    } else if (tileId === TILES.WOOD_RAIL.id) {
-                        this.player.inventory[TILES.WOOD.id] = (this.player.inventory[TILES.WOOD.id] || 0) + 1;
-                        this.spawnText(tx*CONFIG.TILE_SIZE + 16, ty*CONFIG.TILE_SIZE, `+1 Wood`, "#fff");
-                    }
+                    // [MODIFIED] Removed client-side push. Host handles loot via spawnTileLoot.
 
                     this.ui.update();
                 }
@@ -917,7 +920,7 @@ export default class Game {
                         else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
                         else { dropId = TILES.GREY.id; qty = 8; }
                     }
-                    this.loot.push({id: Math.random().toString(36).substr(2,9), x: n.x, y: n.y, id: dropId, qty: qty, bob: Math.random()*100});
+                    this.loot.push({uid: Math.random().toString(36).substr(2,9), x: n.x, y: n.y, id: dropId, qty: qty, bob: Math.random()*100});
                     this.spawnParticles(n.x, n.y, '#f00', 10);
                     return false;
                 }
@@ -928,7 +931,7 @@ export default class Game {
             this.boats = this.boats.filter(b => {
                 if (b.hp <= 0) {
                     for(let i=0; i<8; i++) this.spawnParticles(b.x + (Math.random()-0.5)*40, b.y + (Math.random()-0.5)*40, '#8B4513', 3);
-                    this.loot.push({id: Math.random().toString(36).substr(2,9), x: b.x, y: b.y, id: TILES.CRATE.id, qty: 1, bob: Math.random()*100});
+                    this.loot.push({uid: Math.random().toString(36).substr(2,9), x: b.x, y: b.y, id: TILES.CRATE.id, qty: 1, bob: Math.random()*100});
                     if (this.player.inBoat && b.x === this.player.x && b.y === this.player.y) this.player.inBoat = false;
                     return false;
                 }
@@ -945,7 +948,7 @@ export default class Game {
                 if (this.network.isHost) {
                     // Logic handled locally
                 } else {
-                    this.network.actions.sendEntReq({ id: l.id, act: 'pickup' });
+                    this.network.actions.sendEntReq({ id: l.uid, act: 'pickup' });
                 }
 
                 if (l.id === TILES.CRATE.id) {
