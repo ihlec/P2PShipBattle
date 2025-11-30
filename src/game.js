@@ -1050,6 +1050,15 @@ export default class Game {
                     if (!p.active) return;
                     
                     if (p.owner === 'player' && n === this.player) return;
+                    
+                    // [CO-OP CHANGE] Prevent PvP and Friendly Fire on boats
+                    if (p.owner === 'player') {
+                        // Ignore other players (peers)
+                        if (n.type === 'peer') return;
+                        // Ignore player-owned boats
+                        if (n.type === 'boat' && n.owner === 'player') return;
+                    }
+                    
                     if (p.owner === 'enemy' && n.owner === 'enemy') return; 
 
                     if (n === this.player && this.godMode) return;
