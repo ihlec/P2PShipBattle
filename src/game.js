@@ -3,8 +3,10 @@ import Utils from './utils.js';
 import InputHandler from './input.js';
 import World from './world.js';
 import Renderer from './renderer.js';
-import { Entity, Particle, Projectile, Sheep, Boat, WindParticle } from './entities.js';
+import { Entity, Projectile, Sheep, Boat } from './entities.js';
+import { Particle, WindParticle } from './particles.js';
 import Network from './network.js';
+import UIManager from './ui.js';
 
 export default class Game {
     constructor(roomId, isHost, playerName, loadData) {
@@ -98,30 +100,12 @@ export default class Game {
         this.invasionTimer = (loadData && loadData.invasion) ? (loadData.invasion.timer || 0) : 0;
         this.nextInvasionTime = (loadData && loadData.invasion) ? (loadData.invasion.next || 0) : 0; 
         
-        this.dom = {
-            hp: document.getElementById('hp'),
-            coords: document.getElementById('coords'),
-            seed: document.getElementById('seed-disp'),
-            invBar: document.getElementById('inventory-bar'),
-            wpnBar: document.getElementById('weapon-bar'),
-            bpMenu: document.getElementById('blueprint-menu'),
-            wpnMenu: document.getElementById('weapon-menu'),
-            activeBp: document.getElementById('active-bp-display'),
-            activeWp: document.getElementById('active-weapon-display'),
-            bpName: document.getElementById('current-bp-name'),
-            wpName: document.getElementById('current-weapon-name'),
-            elev: document.getElementById('elev-disp'),
-            biome: document.getElementById('biome-disp'),
-            roomId: document.getElementById('room-id-disp')
-        };
-        
-        this.dom.roomId.innerText = roomId;
-        this.dom.seed.innerText = isHost ? this.world.seed : "Waiting...";
-        
+        this.ui = new UIManager(this); // Init UI Manager
+
         this.renderer = new Renderer(this, this.canvas);
 
-        document.getElementById('hammer-btn').onclick = () => this.toggleBlueprints();
-        document.getElementById('weapon-btn').onclick = () => this.toggleWeapons();
+        document.getElementById('hammer-btn').onclick = () => this.ui.toggleBlueprints();
+        document.getElementById('weapon-btn').onclick = () => this.ui.toggleWeapons();
         document.getElementById('btn-save').onclick = () => this.saveGame();
         
         window.addEventListener('resize', () => {
@@ -129,14 +113,13 @@ export default class Game {
             this.windParticles = Array.from({length: CONFIG.WIND.PARTICLE_COUNT}, () => new WindParticle(this.canvas.width, this.canvas.height));
         });
 
-        this.initUI();
         if(isHost) this.recalcCannons(); 
         
         window.addEventListener('keyup', (e) => {
             if (e.key.toLowerCase() === 'g') {
                 this.godMode = !this.godMode;
                 this.showMessage(this.godMode ? "GOD MODE ON" : "GOD MODE OFF");
-                this.updateUI(); 
+                this.ui.update(); 
             }
             if (e.key.toLowerCase() === 'h' && this.network.isHost) {
                 const angle = Math.random() * Math.PI * 2;
@@ -153,6 +136,7 @@ export default class Game {
             }
         });
 
+        this.ui.update();
         requestAnimationFrame(t => this.loop(t));
     }
 
@@ -168,7 +152,7 @@ export default class Game {
              this.player.y = 100;
         }
         this.player.velocity = {x:0, y:0};
-        this.updateUI();
+        this.ui.update();
     }
 
     saveGame() {
@@ -188,82 +172,7 @@ export default class Game {
         catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
     }
 
-    toggleBlueprints() { this.dom.wpnMenu.style.display = 'none'; const menu = this.dom.bpMenu; menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid'; }
-    toggleWeapons() { this.dom.bpMenu.style.display = 'none'; const menu = this.dom.wpnMenu; menu.style.display = menu.style.display === 'grid' ? 'none' : 'grid'; }
     showMessage(text, color) { const msg = document.getElementById('messages'); msg.innerHTML = text; msg.style.color = color || '#fff'; msg.style.opacity = 1; setTimeout(() => msg.style.opacity = 0, 2000); }
-
-    initUI() {
-        this.dom.invBar.innerHTML = ''; 
-        const materials = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
-        materials.forEach((t) => {
-            const slot = document.createElement('div');
-            slot.className = 'slot';
-            slot.id = `slot-${t.id}`;
-            slot.innerHTML = `<div class="slot-color" style="background:${t.color}"></div><div class="short-name">${t.short}</div><div class="qty" id="qty-${t.id}">0</div>`;
-            slot.onclick = () => {
-                if (this.player.selectedTile === t.id) { this.player.selectedTile = null; } 
-                else { this.player.selectedTile = t.id; this.activeBlueprint = null; }
-                this.updateUI();
-            };
-            this.dom.invBar.appendChild(slot);
-        });
-
-        this.dom.wpnBar.innerHTML = '';
-        const rangeSlot = document.createElement('div');
-        rangeSlot.className = 'slot';
-        rangeSlot.id = 'slot-range';
-        rangeSlot.onclick = () => this.cycleRangeWeapon();
-        this.dom.wpnBar.appendChild(rangeSlot);
-
-        const meleeSlot = document.createElement('div');
-        meleeSlot.className = 'slot';
-        meleeSlot.id = 'slot-melee';
-        meleeSlot.innerHTML = `<div class="icon-sword">🗡️</div><div class="short-name" id="name-melee">Hand</div>`;
-        meleeSlot.onclick = () => this.cycleMeleeWeapon();
-        this.dom.wpnBar.appendChild(meleeSlot);
-
-        this.dom.bpMenu.innerHTML = '';
-        BLUEPRINTS.forEach((bp) => {
-            const div = document.createElement('div');
-            div.className = 'bp-item';
-            let costStr = "Free";
-            if (bp.cost) costStr = Object.entries(bp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
-            div.innerHTML = `<div class="bp-name">${bp.name}</div><div class="bp-req">${costStr}</div>`;
-            div.onclick = () => { 
-                if (div.classList.contains('disabled')) return;
-                this.activeBlueprint = bp; 
-                this.player.selectedTile = null; 
-                this.toggleBlueprints(); 
-                this.updateUI(); 
-            };
-            this.dom.bpMenu.appendChild(div);
-        });
-
-        this.dom.wpnMenu.innerHTML = '';
-        Object.values(WEAPONS).forEach((wp) => {
-            const div = document.createElement('div');
-            div.className = 'bp-item';
-            div.id = `wp-btn-${wp.id}`;
-            let costStr = Object.entries(wp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
-            div.innerHTML = `<div class="bp-name">${wp.name}</div><div class="bp-req">${costStr}</div>`;
-            div.onclick = () => {
-                if (div.classList.contains('disabled')) return;
-                if (wp.type === 'melee' && this.player.inventory[wp.id] > 0) {
-                    this.showMessage("ALREADY OWNED", "#f00");
-                    return;
-                }
-                if (!this.godMode) {
-                    for (const [id, qty] of Object.entries(wp.cost)) this.player.inventory[id] -= qty;
-                }
-                this.player.inventory[wp.id] = (this.player.inventory[wp.id] || 0) + 1;
-                this.showMessage(`Crafted ${wp.name}!`, '#fff');
-                this.toggleWeapons();
-                this.updateUI(); 
-            };
-            this.dom.wpnMenu.appendChild(div);
-        });
-        this.updateUI();
-    }
 
     cycleRangeWeapon() {
         const cycle = [TILES.GREY.id, TILES.SPEAR_WOOD.id, TILES.SPEAR_IRON.id];
@@ -278,7 +187,7 @@ export default class Game {
             }
             attempts++;
         }
-        this.updateUI();
+        this.ui.update();
     }
 
     cycleMeleeWeapon() {
@@ -294,68 +203,7 @@ export default class Game {
             }
             attempts++;
         }
-        this.updateUI();
-    }
-
-    updateUI() {
-        const materials = [TILES.GREY, TILES.BLACK, TILES.IRON, TILES.GOLD, TILES.WOOD, TILES.GREENS, TILES.WOOL];
-        materials.forEach(t => {
-            const slot = document.getElementById(`slot-${t.id}`);
-            const qtyEl = document.getElementById(`qty-${t.id}`);
-            if(slot && qtyEl) {
-                qtyEl.innerText = this.player.inventory[t.id] || 0;
-                slot.classList.toggle('active', !this.activeBlueprint && t.id === this.player.selectedTile);
-            }
-        });
-        const rSlot = document.getElementById('slot-range');
-        let rIcon = ''; let rName = '';
-        if (this.player.activeRange === TILES.GREY.id) { rIcon = `<div class="icon-boulder"></div>`; rName = 'Stone'; } 
-        else if (this.player.activeRange === TILES.SPEAR_WOOD.id) { rIcon = `<div class="icon-spear tip-black"></div>`; rName = 'Ob.Spr'; } 
-        else if (this.player.activeRange === TILES.SPEAR_IRON.id) { rIcon = `<div class="icon-spear tip-grey"></div>`; rName = 'Ir.Spr'; }
-        rSlot.innerHTML = `${rIcon}<div class="short-name">${rName}</div>`;
-        const mSlot = document.getElementById('slot-melee');
-        let mIcon = ''; let mName = '';
-        if (this.player.activeMelee === 'hand') { mIcon = `<div class="icon-fist">✊</div>`; mName = 'Hand'; } 
-        else if (this.player.activeMelee === TILES.SWORD_WOOD.id) { mIcon = `<div class="icon-sword-css blade-black"></div>`; mName = 'Ob.Swd'; } 
-        else if (this.player.activeMelee === TILES.SWORD_IRON.id) { mIcon = `<div class="icon-sword-css blade-grey"></div>`; mName = 'Ir.Swd'; }
-        mSlot.innerHTML = `${mIcon}<div class="short-name">${mName}</div>`;
-        
-        const bpItems = this.dom.bpMenu.children;
-        BLUEPRINTS.forEach((bp, i) => {
-            const div = bpItems[i];
-            let canAfford = true;
-            if (bp.cost && !this.godMode) {
-                for (const [id, qty] of Object.entries(bp.cost)) {
-                    if ((this.player.inventory[id] || 0) < qty) { canAfford = false; break; }
-                }
-            }
-            if (canAfford) div.classList.remove('disabled'); else div.classList.add('disabled');
-        });
-
-        Object.values(WEAPONS).forEach((wp, i) => {
-            const div = document.getElementById(`wp-btn-${wp.id}`);
-            if (!div) return;
-            let canAfford = true;
-            if (wp.cost && !this.godMode) {
-                for (const [id, qty] of Object.entries(wp.cost)) {
-                    if ((this.player.inventory[id] || 0) < qty) { canAfford = false; break; }
-                }
-            }
-            let alreadyOwned = (wp.type === 'melee' && this.player.inventory[wp.id] > 0);
-            if (canAfford && !alreadyOwned) div.classList.remove('disabled'); 
-            else div.classList.add('disabled');
-        });
-
-        if(this.activeBlueprint) {
-            this.dom.activeBp.style.display = 'block';
-            this.dom.bpName.innerText = this.activeBlueprint.name;
-        } else {
-            this.dom.activeBp.style.display = 'none';
-        }
-        
-        const t = this.world.time;
-        const hour = Math.floor(t * 24);
-        this.dom.biome.innerText += ` | ${hour}:00`;
+        this.ui.update();
     }
 
     findSafeSpawn() {
@@ -401,7 +249,7 @@ export default class Game {
         this.projectiles.push(proj);
         this.shootCooldown = 30;
         if (type === 'stone') this.spawnParticles(this.player.x, this.player.y, '#aaa', 3);
-        this.updateUI();
+        this.ui.update();
     }
 
     handleInteraction() {
@@ -439,14 +287,12 @@ export default class Game {
                 return;
             }
             
-            // Feed Sheep
             if (this.player.selectedTile === TILES.GREENS.id) {
                 const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
                 if (clickedSheep && !clickedSheep.fed) {
                     if (this.player.inventory[TILES.GREENS.id] > 0 || this.godMode) {
                         if(!this.godMode) this.player.inventory[TILES.GREENS.id]--;
                         
-                        // [NEW] Network Request
                         if (this.network.isHost) {
                             clickedSheep.fed = true;
                             this.spawnParticles(clickedSheep.x, clickedSheep.y, '#ff00ff', 5);
@@ -455,7 +301,7 @@ export default class Game {
                         }
                         
                         this.spawnText(clickedSheep.x, clickedSheep.y - 10, "❤️", "#f0f");
-                        this.updateUI();
+                        this.ui.update();
                         return;
                     }
                 }
@@ -467,7 +313,7 @@ export default class Game {
                     if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
                     cannon.ammo += 5;
                     this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
-                    this.updateUI();
+                    this.ui.update();
                     return;
                 }
             }
@@ -486,7 +332,7 @@ export default class Game {
                        if (tileDef.solid && isOccupied(gx, gy)) { this.spawnText(mx, my, "BLOCKED", "#f00"); return; }
                        if (this.tryBuild(gx, gy, id, false, false)) {
                            if(!this.godMode) this.player.inventory[id]--;
-                           this.updateUI();
+                           this.ui.update();
                            this.recalcCannons();
                        }
                     }
@@ -531,7 +377,7 @@ export default class Game {
                         this.boats.push(new Boat((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16));
                         for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
                         this.spawnParticles((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16, '#8B4513', 8);
-                        this.updateUI();
+                        this.ui.update();
                         return; 
                     }
 
@@ -555,7 +401,7 @@ export default class Game {
                                 }
                             });
                         }
-                        this.updateUI();
+                        this.ui.update();
                         this.recalcCannons();
                     }
                 }
@@ -565,7 +411,7 @@ export default class Game {
                 if (canAfford(id, 1)) {
                     if (this.tryBuild(gx, gy, id, false, false)) {
                         consume(id, 1);
-                        this.updateUI();
+                        this.ui.update();
                         this.recalcCannons();
                     }
                 }
@@ -605,7 +451,6 @@ export default class Game {
 
             const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
-                // [NEW] Network Request
                 if (this.network.isHost) {
                     clickedSheep.hasWool = false;
                     clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME;
@@ -630,7 +475,7 @@ export default class Game {
                         boatToRepair.hp = Math.min(boatToRepair.hp + CONFIG.REPAIR.AMOUNT, boatToRepair.maxHp);
                         this.spawnParticles(boatToRepair.x, boatToRepair.y, '#0f0', 5);
                         this.spawnText(boatToRepair.x, boatToRepair.y, "+HP", "#0f0");
-                        this.updateUI();
+                        this.ui.update();
                         return;
                     }
                 }
@@ -653,7 +498,7 @@ export default class Game {
                                 
                                 this.spawnParticles(tx*CONFIG.TILE_SIZE+16, ty*CONFIG.TILE_SIZE+16, '#0f0', 5);
                                 this.spawnText(tx*CONFIG.TILE_SIZE+16, ty*CONFIG.TILE_SIZE, "+HP", "#0f0");
-                                this.updateUI();
+                                this.ui.update();
                                 return;
                             }
                         }
@@ -663,7 +508,7 @@ export default class Game {
 
             if (this.activeBlueprint) {
                 this.activeBlueprint = null;
-                this.updateUI();
+                this.ui.update();
             } else {
                 const tx = gx; const ty = gy;
                 let tileId = this.world.getTile(gx, gy);
@@ -684,8 +529,6 @@ export default class Game {
                 if (tileId === TILES.TREE.id) {
                     this.network.requestRemove(tx, ty, TILES.GRASS.id);
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
-                    
-                    // [LOOT WITH IDS]
                     this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
                     if (Math.random() < 0.1) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
                     return;
@@ -707,7 +550,6 @@ export default class Game {
                         
                         this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
                         
-                        // [LOOT WITH IDS]
                         if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
                              this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 3, bob: Math.random()*100});
                              if (Math.random() < 0.1) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
@@ -723,7 +565,7 @@ export default class Game {
                         }
                         
                         this.recalcCannons();
-                        this.updateUI();
+                        this.ui.update();
                     }
                     return;
                 }
@@ -747,7 +589,7 @@ export default class Game {
                         this.spawnText(tx*CONFIG.TILE_SIZE + 16, ty*CONFIG.TILE_SIZE, `+1 Wood`, "#fff");
                     }
 
-                    this.updateUI();
+                    this.ui.update();
                 }
             }
         }
@@ -1117,23 +959,15 @@ export default class Game {
                     this.player.inventory[l.id] = (this.player.inventory[l.id]||0) + l.qty;
                     this.spawnText(this.player.x, this.player.y - 30, `+${l.qty} ${ID_TO_TILE[l.id].short}`, "#ff0");
                 }
-                this.updateUI();
+                this.ui.update();
                 return false; 
             }
             return true;
         });
 
-        this.dom.hp.innerText = Math.floor(this.player.hp);
-        const px = Math.floor(this.player.x/CONFIG.TILE_SIZE);
-        const py = Math.floor(this.player.y/CONFIG.TILE_SIZE);
-        this.dom.coords.innerText = `${px}, ${py}`;
-        
-        const currentElev = Utils.getElevation(px, py, this.world.seed);
-        const currentTileId = this.world.getTile(px, py);
-        this.dom.elev.innerText = currentElev.toFixed(2);
-        this.dom.biome.innerText = ID_TO_TILE[currentTileId].name;
-        
         if (this.player.hp <= 0) this.respawn();
+
+        this.ui.update(); 
         
         this.renderer.draw();
         

@@ -1,6 +1,6 @@
 import { joinRoom } from 'https://cdn.skypack.dev/trystero@0.15.1';
 import { Entity, Sheep, Boat } from './entities.js';
-import { CONFIG, TILES } from './config.js'; // Import needed for Loot Logic if handled here, but mostly passed to game
+import { CONFIG, TILES } from './config.js'; 
 
 export default class Network {
     constructor(game, roomId, isHost, playerName) {
@@ -21,8 +21,8 @@ export default class Network {
         const [sendTileUpd, getTileUpd] = this.room.makeAction('tileUpd');
         const [sendDamage, getDamage] = this.room.makeAction('damage');
         const [sendEnts, getEnts] = this.room.makeAction('ents');
-        const [sendEntReq, getEntReq] = this.room.makeAction('entReq'); // [NEW] Interactions
-        const [sendEntHit, getEntHit] = this.room.makeAction('entHit'); // [NEW] PvE Damage
+        const [sendEntReq, getEntReq] = this.room.makeAction('entReq');
+        const [sendEntHit, getEntHit] = this.room.makeAction('entHit');
 
         this.actions = { 
             sendInit, sendWorld, sendPlayer, sendTileReq, sendTileUpd, 
@@ -70,7 +70,10 @@ export default class Network {
                     modifiedTiles: data.modified,
                     time: data.time
                 });
-                this.game.dom.seed.innerText = data.seed;
+                
+                // [FIXED] Removed direct DOM access to this.game.dom.seed.innerText 
+                // The UIManager loop will handle the display now that the data is imported.
+
                 if (data.spawnX && data.spawnY) {
                     const offsetX = (Math.random() - 0.5) * 128;
                     const offsetY = (Math.random() - 0.5) * 128;
@@ -132,11 +135,10 @@ export default class Network {
                 this.syncList(this.game.npcs, data.n, 'npc');
                 this.syncList(this.game.animals, data.a, 'sheep');
                 this.syncList(this.game.boats, data.b, 'boat');
-                this.syncList(this.game.loot, data.l, 'loot'); // Sync Loot
+                this.syncList(this.game.loot, data.l, 'loot'); 
             }
         });
 
-        // [NEW] Host handles interaction requests
         getEntReq((data, peerId) => {
             if (this.isHost) {
                 if (data.act === 'shear') {
@@ -164,7 +166,6 @@ export default class Network {
             }
         });
 
-        // [NEW] Host handles PvE damage
         getEntHit((data, peerId) => {
             if (this.isHost) {
                 const targets = [...this.game.npcs, ...this.game.animals, ...this.game.boats];
@@ -193,7 +194,7 @@ export default class Network {
                 localList.push(entity);
             }
             
-            if (type === 'loot') return; // Loot doesn't move/update once spawned
+            if (type === 'loot') return; 
 
             const dx = d.x - entity.x;
             const dy = d.y - entity.y;
@@ -246,8 +247,6 @@ export default class Network {
                  const n = this.game.npcs.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp }));
                  const a = this.game.animals.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
                  const b = this.game.boats.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
-                 
-                 // Sync Loot (t=type/tileId, q=qty)
                  const l = this.game.loot.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), t: e.id, q: e.qty }));
 
                  this.actions.sendEnts({ n, a, b, l });

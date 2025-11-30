@@ -1,79 +1,6 @@
 import { CONFIG, TILES } from './config.js';
 import Utils from './utils.js';
-
-export class Particle {
-    constructor(x, y, color, dx, dy, life) {
-        this.x = x; this.y = y; this.color = color;
-        this.dx = dx; this.dy = dy; 
-        this.life = life; this.maxLife = life;
-    }
-    update() { this.x += this.dx; this.y += this.dy; this.life--; }
-    draw(ctx, camX, camY) {
-        ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
-        ctx.fillStyle = this.color;
-        ctx.fillRect(this.x - camX, this.y - camY, 4, 4);
-        ctx.globalAlpha = 1.0;
-    }
-}
-
-export class WakeParticle {
-    constructor(x, y, angle) {
-        this.x = x; 
-        this.y = y;
-        this.life = 60 + Math.random() * 40;
-        this.maxLife = this.life;
-        this.size = Math.random() * 10 + 5;
-        this.dx = Math.cos(angle) * 0.5;
-        this.dy = Math.sin(angle) * 0.5;
-    }
-    update() {
-        this.x += this.dx;
-        this.y += this.dy;
-        this.size += 0.2; 
-        this.life--;
-    }
-    draw(ctx, camX, camY) {
-        ctx.globalAlpha = (this.life / this.maxLife) * 0.4;
-        ctx.fillStyle = '#aaddff';
-        ctx.beginPath();
-        ctx.arc(this.x - camX, this.y - camY, this.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
-    }
-}
-
-export class WindParticle {
-    constructor(screenWidth, screenHeight) {
-        this.x = Math.random() * screenWidth;
-        this.y = Math.random() * screenHeight;
-        this.speed = (CONFIG.WIND.SPEED_BASE * 4) + Math.random() * (CONFIG.WIND.SPEED_VARIATION * 2);
-        this.length = 10 + Math.random() * 20; 
-        this.thickness = Math.random() > 0.5 ? 1 : 2;
-    }
-
-    update(screenWidth, screenHeight, angle, camDx, camDy) {
-        const dx = Math.cos(angle) * this.speed;
-        const dy = Math.sin(angle) * this.speed;
-        this.x += dx - camDx;
-        this.y += dy - camDy;
-        const buffer = 50;
-        const totalW = screenWidth + buffer * 2;
-        const totalH = screenHeight + buffer * 2;
-        if (this.x < -buffer) this.x += totalW;
-        if (this.x > screenWidth + buffer) this.x -= totalW;
-        if (this.y < -buffer) this.y += totalH;
-        if (this.y > screenHeight + buffer) this.y -= totalH;
-    }
-
-    draw(ctx, angle) {
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        ctx.rotate(angle);
-        ctx.fillStyle = CONFIG.WIND.COLOR;
-        ctx.fillRect(0, 0, this.length, this.thickness);
-        ctx.restore();
-    }
-}
+import { WakeParticle } from './particles.js'; // Import needed for Boat
 
 export class Projectile {
     constructor(x, y, tx, ty, damage, speed, color, isPlayerOwner, type = 'stone') {
@@ -124,7 +51,7 @@ export class Projectile {
 
 export class Entity {
     constructor(x, y, type) {
-        this.id = Math.random().toString(36).substr(2, 9); // Network ID
+        this.id = Math.random().toString(36).substr(2, 9);
         this.x = x; this.y = y; this.type = type;
         this.speed = CONFIG.PLAYER_SPEED_BASE;
         this.hp = 100;
@@ -288,21 +215,15 @@ export class Sheep extends Entity {
         this.woolTimer = 0;
     }
 
-    // [FIXED] Now accepts (dt, player, world, game) to match standard signature
     updateAI(dt, player, world, game) {
         if (!this.hasWool) {
             this.woolTimer--;
             if (this.woolTimer <= 0) this.hasWool = true;
         }
-        
-        // [SAFETY] Fix for "undefined to object" error
         if (!game || !game.peers) return;
-
-        // Gather all potential threats (Host + Peers)
         const allPlayers = [game.player, ...Object.values(game.peers)];
         let closestPlayer = null;
-        let minDist = 150; // Flee distance
-
+        let minDist = 150; 
         for (const p of allPlayers) {
             const d = Utils.distance(this, p);
             if (d < minDist) {
@@ -310,13 +231,10 @@ export class Sheep extends Entity {
                 closestPlayer = p;
             }
         }
-        
         if (closestPlayer) {
-            // Flee from the closest player found
             const angle = Math.atan2(this.y - closestPlayer.y, this.x - closestPlayer.x);
             this.move(Math.cos(angle) * 1.5, Math.sin(angle) * 1.5, world);
         } else {
-            // Wander
             this.moveTimer--;
             if (this.moveTimer <= 0) {
                 this.moveTimer = 60 + Math.random() * 60;
