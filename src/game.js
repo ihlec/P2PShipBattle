@@ -15,7 +15,7 @@ export default class Game {
         this.world = new World(); 
         this.network = new Network(this, roomId, isHost, playerName);
         this.peers = {}; 
-        this.spawnPoint = {x: 0, y: 0}; // [NEW] Store spawn for respawning
+        this.spawnPoint = {x: 0, y: 0};
         
         // --- MAP GENERATION / LOADING ---
         let validSpawn = {x: 0, y: 0};
@@ -48,7 +48,7 @@ export default class Game {
                     console.warn("Could not find safe spawn. Forcing 0,0.");
                 }
             }
-            this.spawnPoint = { ...validSpawn }; // Host sets their spawn
+            this.spawnPoint = { ...validSpawn }; 
         }
 
         this.player = new Entity(validSpawn.x, validSpawn.y, 'player');
@@ -112,10 +112,9 @@ export default class Game {
             wpName: document.getElementById('current-weapon-name'),
             elev: document.getElementById('elev-disp'),
             biome: document.getElementById('biome-disp'),
-            roomId: document.getElementById('room-id-disp') // [NEW]
+            roomId: document.getElementById('room-id-disp')
         };
         
-        // [NEW] Display Room ID
         this.dom.roomId.innerText = roomId;
         this.dom.seed.innerText = isHost ? this.world.seed : "Waiting...";
         
@@ -157,25 +156,17 @@ export default class Game {
         requestAnimationFrame(t => this.loop(t));
     }
 
-    // [NEW] Respawn Logic
     respawn() {
         this.spawnParticles(this.player.x, this.player.y, '#f00', 20);
         this.spawnText(this.player.x, this.player.y, "RESPAWNED", "#fff");
-        
-        // Reset Stats
         this.player.hp = this.player.maxHp;
         this.player.inBoat = false;
-        
-        // Reset Position to spawn point (Client's spawn is set by network.js)
         this.player.x = this.spawnPoint.x;
         this.player.y = this.spawnPoint.y;
-        
-        // Safety: Ensure not trapped if spawn was 0,0 default
         if(this.player.x === 0 && this.player.y === 0) {
              this.player.x = 100;
              this.player.y = 100;
         }
-        
         this.player.velocity = {x:0, y:0};
         this.updateUI();
     }
@@ -439,17 +430,12 @@ export default class Game {
         if (this.input.mouse.clickedLeft) {
             const clickedTile = this.world.getTile(gx, gy);
             
-            // Toggle Gates
             if (clickedTile === TILES.WOOD_WALL.id) {
-                if(this.tryBuild(gx, gy, TILES.WOOD_WALL_OPEN.id)) {
-                    this.spawnParticles(mx, my, TILES.WOOD.color, 4);
-                }
+                if(this.tryBuild(gx, gy, TILES.WOOD_WALL_OPEN.id)) this.spawnParticles(mx, my, TILES.WOOD.color, 4);
                 return;
             } else if (clickedTile === TILES.WOOD_WALL_OPEN.id) {
                 if (isOccupied(gx, gy)) { this.spawnText(mx, my, "BLOCKED", "#f00"); return; }
-                if(this.tryBuild(gx, gy, TILES.WOOD_WALL.id)) {
-                    this.spawnParticles(mx, my, TILES.WOOD.color, 4);
-                }
+                if(this.tryBuild(gx, gy, TILES.WOOD_WALL.id)) this.spawnParticles(mx, my, TILES.WOOD.color, 4);
                 return;
             }
             
@@ -459,8 +445,15 @@ export default class Game {
                 if (clickedSheep && !clickedSheep.fed) {
                     if (this.player.inventory[TILES.GREENS.id] > 0 || this.godMode) {
                         if(!this.godMode) this.player.inventory[TILES.GREENS.id]--;
-                        clickedSheep.fed = true;
-                        this.spawnParticles(clickedSheep.x, clickedSheep.y, '#ff00ff', 5);
+                        
+                        // [NEW] Network Request
+                        if (this.network.isHost) {
+                            clickedSheep.fed = true;
+                            this.spawnParticles(clickedSheep.x, clickedSheep.y, '#ff00ff', 5);
+                        } else {
+                            this.network.actions.sendEntReq({ id: clickedSheep.id, act: 'feed' });
+                        }
+                        
                         this.spawnText(clickedSheep.x, clickedSheep.y - 10, "❤️", "#f0f");
                         this.updateUI();
                         return;
@@ -468,7 +461,6 @@ export default class Game {
                 }
             }
 
-            // Refill Cannons
             const cannon = this.cannons.find(c => { const [cx, cy] = c.key.split(',').map(Number); return gx === cx && gy === cy; });
             if (cannon && this.player.selectedTile === TILES.IRON.id) {
                 if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
@@ -480,7 +472,6 @@ export default class Game {
                 }
             }
 
-            // Build or Shoot
             if (!this.activeBlueprint) {
                 const sel = this.player.selectedTile;
                 if (!sel) {
@@ -503,7 +494,6 @@ export default class Game {
                 }
             }
 
-            // Tree / Resource Harvesting (Left Click)
             if (this.player.selectedTile === TILES.TREE.id || this.player.selectedTile === TILES.MOUNTAIN.id) return; 
 
             const canAfford = (id, cost) => this.godMode || (this.player.inventory[id] || 0) >= cost;
@@ -615,10 +605,19 @@ export default class Game {
 
             const clickedSheep = this.animals.find(s => Utils.distance(s, {x:mx, y:my}) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
-                clickedSheep.hasWool = false;
-                clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME;
-                this.loot.push({x: clickedSheep.x, y: clickedSheep.y, id: TILES.WOOL.id, qty: 1, bob: Math.random()*100});
-                this.spawnParticles(clickedSheep.x, clickedSheep.y, '#eee', 5);
+                // [NEW] Network Request
+                if (this.network.isHost) {
+                    clickedSheep.hasWool = false;
+                    clickedSheep.woolTimer = CONFIG.WOOL_REGROW_TIME;
+                    this.loot.push({
+                        id: Math.random().toString(36).substr(2,9),
+                        x: clickedSheep.x, y: clickedSheep.y, 
+                        id: TILES.WOOL.id, qty: 1, bob: Math.random()*100
+                    });
+                    this.spawnParticles(clickedSheep.x, clickedSheep.y, '#eee', 5);
+                } else {
+                    this.network.actions.sendEntReq({ id: clickedSheep.id, act: 'shear' });
+                }
                 return;
             }
 
@@ -682,16 +681,16 @@ export default class Game {
                 
                 if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id || tileId === TILES.SAND.id || tileId === TILES.GRASS.id) return;
                 
-                // [HARVESTING: TREES]
                 if (tileId === TILES.TREE.id) {
                     this.network.requestRemove(tx, ty, TILES.GRASS.id);
                     this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
-                    this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
-                    if (Math.random() < 0.1) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
+                    
+                    // [LOOT WITH IDS]
+                    this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 3, bob: Math.random()*100});
+                    if (Math.random() < 0.1) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREENS.id, qty: 1, bob: Math.random()*100});
                     return;
                 }
 
-                // [HARVESTING: ROCKS / STRUCTURES]
                 if (tileDef.hp) {
                     const damageDealt = 20; 
                     const totalDmg = this.world.hitTile(tx, ty, damageDealt);
@@ -708,18 +707,19 @@ export default class Game {
                         
                         this.spawnParticles(tx * CONFIG.TILE_SIZE + 16, ty * CONFIG.TILE_SIZE + 16, '#555', 10);
                         
+                        // [LOOT WITH IDS]
                         if (tileId === TILES.MOUNTAIN.id || tileId === TILES.STONE_BLOCK.id) {
-                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 3, bob: Math.random()*100});
-                             if (Math.random() < 0.1) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
-                             if (Math.random() < 0.01) this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
+                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 3, bob: Math.random()*100});
+                             if (Math.random() < 0.1) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.IRON.id, qty: 2, bob: Math.random()*100});
+                             if (Math.random() < 0.01) this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GOLD.id, qty: 1, bob: Math.random()*100});
                         } else if (tileDef.isTower) {
-                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 4, bob: Math.random()*100});
+                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 4, bob: Math.random()*100});
                         } else if (tileId === TILES.WOOD_WALL.id || tileId === TILES.WOOD_WALL_OPEN.id) {
-                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
+                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
                         } else if (tileId === TILES.WALL.id) {
-                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 1, bob: Math.random()*100});
+                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.GREY.id, qty: 1, bob: Math.random()*100});
                         } else if (tileId === TILES.TORCH.id) {
-                             this.loot.push({x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
+                             this.loot.push({id: Math.random().toString(36).substr(2,9), x: tx*CONFIG.TILE_SIZE + 16, y: ty*CONFIG.TILE_SIZE + 16, id: TILES.WOOD.id, qty: 1, bob: Math.random()*100});
                         }
                         
                         this.recalcCannons();
@@ -728,7 +728,6 @@ export default class Game {
                     return;
                 }
 
-                // [REMOVAL LOGIC: PLACED BLOCKS]
                 const removable = [TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, TILES.WOOD.id, TILES.GREENS.id, TILES.WOOL.id];
                 if (removable.includes(tileId) || tileId === TILES.WOOD_RAIL.id) {
                     if (isOccupied(tx, ty)) { this.spawnText(mx * this.zoom, my * this.zoom, "OCCUPIED", "#f00"); return; }
@@ -853,7 +852,6 @@ export default class Game {
         if (this.player.inBoat) {
             if (this.input.keys['q']) this.player.shootBroadside(this, 'left');
             if (this.input.keys['e']) this.player.shootBroadside(this, 'right');
-            
             this.player.updateBoatMovement(inputState, dt, this.world, this); 
             this.player.moveTime += dt;
         } else {
@@ -862,7 +860,6 @@ export default class Game {
             if(inputState.down) dy = 1;
             if(inputState.left) dx = -1;
             if(inputState.right) dx = 1;
-            
             if (dx || dy) {
                 this.player.isMoving = true; 
                 this.player.moveTime += dt;  
@@ -883,8 +880,8 @@ export default class Game {
         this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle, camDx, camDy));
 
         this.handleInteraction();
+        this.updateMeleeCombat(); 
 
-        // ONLY HOST RUNS AI & INVASIONS
         if (this.network.isHost) {
              const enemyBoat = this.boats.find(b => b.owner === 'enemy');
              if (!enemyBoat) {
@@ -897,16 +894,13 @@ export default class Game {
                         const sy = this.player.y + Math.sin(angle) * dist;
                         const gx = Math.floor(sx / CONFIG.TILE_SIZE);
                         const gy = Math.floor(sy / CONFIG.TILE_SIZE);
-                        
                         const checkWater = (cx, cy) => {
                             const tile = this.world.getTile(Math.floor(cx/CONFIG.TILE_SIZE), Math.floor(cy/CONFIG.TILE_SIZE));
                             return tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
                         };
-
                         if (checkWater(sx, sy) && checkWater(sx + 16, sy) && checkWater(sx - 16, sy)) {
                             this.boats.push(new Boat(sx, sy, 'enemy'));
                             this.spawnText(sx, sy, "NEW INVASION", "#f00");
-                            
                             this.invasionTimer = 0;
                             const minFrames = 7200; 
                             const maxFrames = 72000;
@@ -921,7 +915,6 @@ export default class Game {
              
              this.npcs.forEach(npc => {
                 if (!npc.aiState) npc.aiState = { mode: 'chase', tx: 0, ty: 0, timer: 0 };
-
                 if (npc.aiState.timer > 0) {
                     npc.aiState.timer--;
                     npc.isMoving = false;
@@ -930,9 +923,8 @@ export default class Game {
                     if (dist < 80) {
                         npc.aiState.mode = 'charge';
                         const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
-                        const overrunDist = 150; 
-                        npc.aiState.tx = this.player.x + Math.cos(angle) * overrunDist;
-                        npc.aiState.ty = this.player.y + Math.sin(angle) * overrunDist;
+                        npc.aiState.tx = this.player.x + Math.cos(angle) * 150;
+                        npc.aiState.ty = this.player.y + Math.sin(angle) * 150;
                     } else {
                         const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
                         npc.move(Math.cos(angle) * 2, Math.sin(angle) * 2, this.world);
@@ -943,7 +935,6 @@ export default class Game {
                     const dx = npc.aiState.tx - npc.x;
                     const dy = npc.aiState.ty - npc.y;
                     const distToTarget = Math.sqrt(dx*dx + dy*dy);
-                    
                     if (distToTarget < 10) {
                         npc.aiState.mode = 'rest';
                         npc.aiState.timer = 60 + Math.random() * 60; 
@@ -956,7 +947,6 @@ export default class Game {
                 } else if (npc.aiState.mode === 'rest') {
                     npc.aiState.mode = 'chase';
                 }
-
                 if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
                     if (!this.godMode) {
                         this.player.damageBuffer += 0.5; 
@@ -965,21 +955,6 @@ export default class Game {
                             this.player.hp -= dmg;
                             this.player.damageBuffer -= dmg;
                             if (Math.random() > 0.8) this.spawnParticles(this.player.x, this.player.y, '#f00', 2);
-                        }
-                    }
-                    
-                    if (this.player.isMoving) { 
-                        let dmg = 0;
-                        const meleeId = this.player.activeMelee;
-                        if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
-                        else if (meleeId === TILES.SWORD_WOOD.id) dmg = 50;
-                        else if (meleeId === 'hand') dmg = 1;
-
-                        if (dmg > 0 && this.shootCooldown <= 0) {
-                            npc.hp -= dmg;
-                            this.spawnParticles(npc.x, npc.y, '#fff', 8);
-                            this.spawnText(npc.x, npc.y, `HIT ${dmg}`, "#ff0");
-                            this.shootCooldown = 20; 
                         }
                     }
                 }
@@ -993,10 +968,8 @@ export default class Game {
             const ny = this.player.y + Math.sin(ang)*dist;
             const ngx = Math.floor(nx / CONFIG.TILE_SIZE);
             const ngy = Math.floor(ny / CONFIG.TILE_SIZE);
-            
             const spawnPoint = {x: nx, y: ny};
             const occupied = [...this.npcs, ...this.animals].some(e => Utils.distance(e, spawnPoint) < CONFIG.TILE_SIZE);
-
             if (!occupied) {
                 const tileId = this.world.getTile(ngx, ngy);
                 const tileDef = ID_TO_TILE[tileId];
@@ -1008,9 +981,8 @@ export default class Game {
 
         this.animals.forEach(s => {
             if(this.network.isHost) {
-                s.updateAI(dt, this.player, this.world);
+                s.updateAI(dt, this.player, this.world, this); 
                 if (s.isMoving) s.moveTime += dt;
-                
                 if (s.fed) {
                     this.animals.forEach(mate => {
                         if (s !== mate && mate.fed && Utils.distance(s, mate) < 20) {
@@ -1030,7 +1002,6 @@ export default class Game {
             else if (c.ammo > 0) {
                 const validTargets = [...this.npcs, ...this.boats.filter(b => b.owner === 'enemy')];
                 let target = validTargets.find(n => Utils.distance(c, n) < c.range);
-                
                 if (target) {
                     this.projectiles.push(new Projectile(c.x, c.y - CONFIG.TILE_SIZE, target.x, target.y, c.damage, 12, '#fff', true));
                     c.cooldown = 60;
@@ -1044,111 +1015,84 @@ export default class Game {
             const status = p.update();
             const targets = [this.player, ...this.npcs, ...this.animals, ...this.boats, ...Object.values(this.peers)];
             let hit = false;
-
             if (p.active) {
                 targets.forEach(n => {
                     if (!p.active) return;
-                    
                     if (p.owner === 'player' && n === this.player) return;
-                    
-                    // [CO-OP CHANGE] Prevent PvP and Friendly Fire on boats
                     if (p.owner === 'player') {
-                        // Ignore other players (peers)
                         if (n.type === 'peer') return;
-                        // Ignore player-owned boats
                         if (n.type === 'boat' && n.owner === 'player') return;
                     }
-                    
                     if (p.owner === 'enemy' && n.owner === 'enemy') return; 
-
                     if (n === this.player && this.godMode) return;
-
                     if (n === this.player && this.player.inBoat) return;
                     if (p.owner === 'player' && n.type === 'boat') {
                         if (this.player.inBoat && n.x === this.player.x && n.y === this.player.y) return;
                     }
-
                     let hitDist = 16;
                     if (n.type === 'boat') hitDist = 32;
-
                     if (Utils.distance(p, n) < hitDist) {
                         p.active = false;
                         hit = true;
-                        
-                        if (n.type === 'peer') {
-                            this.network.sendHit(n.id, p.damage);
-                            this.spawnParticles(n.x, n.y, '#f00', 6);
+                        if (this.network.isHost) {
+                             n.hp -= p.damage;
                         } else {
-                            n.hp -= p.damage;
-                            
-                            if (n.type === 'boat') {
-                                this.spawnParticles(p.x, p.y, '#ff0000', 5); 
-                                this.spawnParticles(p.x, p.y, '#ffa500', 5);
-                                this.spawnText(n.x, n.y - 20, Math.floor(p.damage), "#ff4444");
-                            } else {
-                                this.spawnParticles(n.x, n.y, '#f00', 6);
-                                this.spawnText(n.x, n.y, Math.floor(p.damage), "#fff");
-                            }
+                             this.network.actions.sendEntHit({ id: n.id, dmg: p.damage });
+                        }
+                        if (n.type === 'boat') {
+                            this.spawnParticles(p.x, p.y, '#ff0000', 5); 
+                            this.spawnParticles(p.x, p.y, '#ffa500', 5);
+                            this.spawnText(n.x, n.y - 20, Math.floor(p.damage), "#ff4444");
+                        } else {
+                            this.spawnParticles(n.x, n.y, '#f00', 6);
+                            this.spawnText(n.x, n.y, Math.floor(p.damage), "#fff");
                         }
                     }
                 });
             }
-
             if ((!hit && !p.active && status === 'expired') && p.type === 'cannonball') {
                 const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
                 const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
                 const tile = this.world.getTile(gx, gy);
-                if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) {
-                    this.spawnParticles(p.x, p.y, '#3498db', 6); 
-                } else {
-                    this.spawnParticles(p.x, p.y, '#555', 4);
-                }
+                if (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id) this.spawnParticles(p.x, p.y, '#3498db', 6); 
+                else this.spawnParticles(p.x, p.y, '#555', 4);
             }
         });
 
         this.projectiles = this.projectiles.filter(p => p.active);
 
-        const cleanup = (arr) => arr.filter(n => {
-            if (n.hp <= 0) {
-                const roll = Math.random();
-                let dropId = TILES.GREY.id;
-                let qty = 1;
-                
-                if (n.type === 'sheep') {
-                     dropId = TILES.WOOL.id; 
-                     qty = 2;
-                } else {
-                     if (roll < 0.10) { dropId = TILES.GOLD.id; qty = 2; } 
-                     else if (roll < 0.40) { dropId = TILES.WOOD.id; qty = 5; } 
-                     else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
-                     else { dropId = TILES.GREY.id; qty = 8; }
+        if (this.network.isHost) {
+            const cleanup = (arr) => arr.filter(n => {
+                if (n.hp <= 0) {
+                    const roll = Math.random();
+                    let dropId = TILES.GREY.id;
+                    let qty = 1;
+                    if (n.type === 'sheep') {
+                        dropId = TILES.WOOL.id; qty = 2;
+                    } else {
+                        if (roll < 0.10) { dropId = TILES.GOLD.id; qty = 2; } 
+                        else if (roll < 0.40) { dropId = TILES.WOOD.id; qty = 5; } 
+                        else if (roll < 0.70) { dropId = TILES.IRON.id; qty = 5; } 
+                        else { dropId = TILES.GREY.id; qty = 8; }
+                    }
+                    this.loot.push({id: Math.random().toString(36).substr(2,9), x: n.x, y: n.y, id: dropId, qty: qty, bob: Math.random()*100});
+                    this.spawnParticles(n.x, n.y, '#f00', 10);
+                    return false;
                 }
-
-                this.loot.push({x: n.x, y: n.y, id: dropId, qty: qty, bob: Math.random()*100});
-                this.spawnParticles(n.x, n.y, '#f00', 10);
-                return false;
-            }
-            return true;
-        });
-
-        this.npcs = cleanup(this.npcs);
-        this.animals = cleanup(this.animals);
-        
-        this.boats = this.boats.filter(b => {
-             if (b.hp <= 0) {
-                 for(let i=0; i<8; i++) {
-                     this.spawnParticles(b.x + (Math.random()-0.5)*40, b.y + (Math.random()-0.5)*40, '#8B4513', 3);
-                 }
-                 this.loot.push({x: b.x, y: b.y, id: TILES.CRATE.id, qty: 1, bob: Math.random()*100});
-                 
-                 if (this.player.inBoat && b.x === this.player.x && b.y === this.player.y) {
-                     this.player.inBoat = false;
-                 }
-                 
-                 return false;
-             }
-             return true;
-        });
+                return true;
+            });
+            this.npcs = cleanup(this.npcs);
+            this.animals = cleanup(this.animals);
+            this.boats = this.boats.filter(b => {
+                if (b.hp <= 0) {
+                    for(let i=0; i<8; i++) this.spawnParticles(b.x + (Math.random()-0.5)*40, b.y + (Math.random()-0.5)*40, '#8B4513', 3);
+                    this.loot.push({id: Math.random().toString(36).substr(2,9), x: b.x, y: b.y, id: TILES.CRATE.id, qty: 1, bob: Math.random()*100});
+                    if (this.player.inBoat && b.x === this.player.x && b.y === this.player.y) this.player.inBoat = false;
+                    return false;
+                }
+                return true;
+            });
+        }
 
         this.particles.forEach(p => p.update());
         this.particles = this.particles.filter(p => p.life > 0);
@@ -1156,6 +1100,12 @@ export default class Game {
         this.texts = this.texts.filter(t => t.life > 0);
         this.loot = this.loot.filter(l => {
             if (Utils.distance(this.player, l) < 32) {
+                if (this.network.isHost) {
+                    // Logic handled locally
+                } else {
+                    this.network.actions.sendEntReq({ id: l.id, act: 'pickup' });
+                }
+
                 if (l.id === TILES.CRATE.id) {
                     const wood = 10 + Math.floor(Math.random() * 10);
                     const iron = 5 + Math.floor(Math.random() * 5);
@@ -1168,7 +1118,7 @@ export default class Game {
                     this.spawnText(this.player.x, this.player.y - 30, `+${l.qty} ${ID_TO_TILE[l.id].short}`, "#ff0");
                 }
                 this.updateUI();
-                return false;
+                return false; 
             }
             return true;
         });
@@ -1190,7 +1140,30 @@ export default class Game {
         this.input.flush();
     }
     
-    // Main Loop
+    updateMeleeCombat() {
+        if (!this.player.isMoving || this.shootCooldown > 0) return;
+        let dmg = 0;
+        const meleeId = this.player.activeMelee;
+        if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
+        else if (meleeId === TILES.SWORD_WOOD.id) dmg = 50;
+        else if (meleeId === 'hand') dmg = 1;
+        if (dmg === 0) return;
+        const targets = [...this.npcs, ...this.animals];
+        for (const t of targets) {
+            if (Utils.distance(this.player, t) < CONFIG.TILE_SIZE) {
+                if (this.network.isHost) {
+                    t.hp -= dmg;
+                } else {
+                    this.network.actions.sendEntHit({ id: t.id, dmg: dmg });
+                }
+                this.spawnParticles(t.x, t.y, '#fff', 8);
+                this.spawnText(t.x, t.y, `HIT ${dmg}`, "#ff0");
+                this.shootCooldown = 20; 
+                return; 
+            }
+        }
+    }
+
     loop(timestamp) {
         const dt = timestamp - this.lastTime;
         this.lastTime = timestamp;

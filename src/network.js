@@ -1,4 +1,6 @@
 import { joinRoom } from 'https://cdn.skypack.dev/trystero@0.15.1';
+import { Entity, Sheep, Boat } from './entities.js';
+import { CONFIG, TILES } from './config.js'; // Import needed for Loot Logic if handled here, but mostly passed to game
 
 export default class Network {
     constructor(game, roomId, isHost, playerName) {
@@ -6,6 +8,7 @@ export default class Network {
         this.roomId = roomId;
         this.isHost = isHost;
         this.playerName = playerName;
+        this.lastEntSync = 0;
         
         const config = { appId: 'pixel-warfare-v2' };
         this.room = joinRoom(config, roomId);
@@ -17,14 +20,19 @@ export default class Network {
         const [sendTileReq, getTileReq] = this.room.makeAction('tileReq');
         const [sendTileUpd, getTileUpd] = this.room.makeAction('tileUpd');
         const [sendDamage, getDamage] = this.room.makeAction('damage');
+        const [sendEnts, getEnts] = this.room.makeAction('ents');
+        const [sendEntReq, getEntReq] = this.room.makeAction('entReq'); // [NEW] Interactions
+        const [sendEntHit, getEntHit] = this.room.makeAction('entHit'); // [NEW] PvE Damage
 
-        this.actions = { sendInit, sendWorld, sendPlayer, sendTileReq, sendTileUpd, sendDamage };
+        this.actions = { 
+            sendInit, sendWorld, sendPlayer, sendTileReq, sendTileUpd, 
+            sendDamage, sendEnts, sendEntReq, sendEntHit 
+        };
 
         // --- EVENTS ---
         this.room.onPeerJoin(peerId => {
             console.log(`Peer joined: ${peerId}`);
             if (this.isHost) {
-                // Send World Data + Host Position for spawning
                 this.actions.sendWorld({
                     seed: this.game.world.seed,
                     modified: this.game.world.modifiedTiles,
@@ -42,8 +50,6 @@ export default class Network {
         });
 
         // --- HANDLERS ---
-        
-        // 1. Init (Receive Name)
         getInit((data, peerId) => {
             if (!this.game.peers[peerId]) {
                 this.game.peers[peerId] = { 
@@ -57,18 +63,14 @@ export default class Network {
             }
         });
 
-        // 2. World Sync (Client receives map)
         getWorld((data, peerId) => {
             if (!this.isHost) {
-                console.log("Received World Data");
                 this.game.world.importData({
                     seed: data.seed,
                     modifiedTiles: data.modified,
                     time: data.time
                 });
                 this.game.dom.seed.innerText = data.seed;
-                
-                // Spawn near Host
                 if (data.spawnX && data.spawnY) {
                     const offsetX = (Math.random() - 0.5) * 128;
                     const offsetY = (Math.random() - 0.5) * 128;
@@ -78,25 +80,15 @@ export default class Network {
             }
         });
 
-        // 3. Player Update (Receive Position Targets)
         getPlayer((data, peerId) => {
             const p = this.game.peers[peerId];
             if (p) {
-                // Set INTERPOLATION TARGETS, do not snap x/y directly
-                p.targetX = data.x;
-                p.targetY = data.y;
-                p.activeMelee = data.w; 
-                p.inBoat = data.b;
-                p.hp = data.hp; 
-                p.isMoving = data.mv;
+                p.targetX = data.x; p.targetY = data.y;
+                p.activeMelee = data.w; p.inBoat = data.b;
+                p.hp = data.hp; p.isMoving = data.mv;
                 if(data.mv) p.moveTime += 16; 
-                
-                // Initial Snap
-                if (p.x === 0 && p.y === 0) {
-                    p.x = data.x; p.y = data.y;
-                }
+                if (p.x === 0 && p.y === 0) { p.x = data.x; p.y = data.y; }
             } else {
-                // Init if missing
                 this.game.peers[peerId] = { 
                     id: peerId, type: 'peer', name: "Player",
                     x: data.x, y: data.y, targetX: data.x, targetY: data.y,
@@ -107,7 +99,6 @@ export default class Network {
             }
         });
 
-        // 4. Tile Request (Host processes build/remove)
         getTileReq((data, peerId) => {
             if (this.isHost) {
                 if (data.type === 'build') {
@@ -115,13 +106,12 @@ export default class Network {
                         this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
                     }
                 } else if (data.type === 'remove') {
-                     this.game.world.setTile(data.x, data.y, data.id); // data.id is restoreId here
+                     this.game.world.setTile(data.x, data.y, data.id); 
                      this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
                 }
             }
         });
 
-        // 5. Tile Update (Client applies change)
         getTileUpd((data, peerId) => {
             if (data.action === 'set') {
                 this.game.world.setTile(data.x, data.y, data.id);
@@ -129,7 +119,6 @@ export default class Network {
             }
         });
 
-        // 6. Damage (Client receives hit)
         getDamage((amount, peerId) => {
             if (!this.game.godMode) {
                 this.game.player.hp -= amount;
@@ -137,10 +126,107 @@ export default class Network {
                 this.game.spawnParticles(this.game.player.x, this.game.player.y, '#f00', 5);
             }
         });
+
+        getEnts((data) => {
+            if (!this.isHost) {
+                this.syncList(this.game.npcs, data.n, 'npc');
+                this.syncList(this.game.animals, data.a, 'sheep');
+                this.syncList(this.game.boats, data.b, 'boat');
+                this.syncList(this.game.loot, data.l, 'loot'); // Sync Loot
+            }
+        });
+
+        // [NEW] Host handles interaction requests
+        getEntReq((data, peerId) => {
+            if (this.isHost) {
+                if (data.act === 'shear') {
+                    const sheep = this.game.animals.find(s => s.id === data.id);
+                    if (sheep && sheep.hasWool) {
+                        sheep.hasWool = false;
+                        sheep.woolTimer = 36000;
+                        this.game.loot.push({
+                            id: Math.random().toString(36).substr(2,9),
+                            x: sheep.x, y: sheep.y, 
+                            id: TILES.WOOL.id, qty: 1, bob: Math.random()*100
+                        });
+                        this.game.spawnParticles(sheep.x, sheep.y, '#eee', 5);
+                    }
+                } else if (data.act === 'feed') {
+                    const sheep = this.game.animals.find(s => s.id === data.id);
+                    if (sheep && !sheep.fed) {
+                        sheep.fed = true;
+                        this.game.spawnParticles(sheep.x, sheep.y, '#ff00ff', 5);
+                    }
+                } else if (data.act === 'pickup') {
+                    const idx = this.game.loot.findIndex(l => l.id === data.id);
+                    if (idx !== -1) this.game.loot.splice(idx, 1);
+                }
+            }
+        });
+
+        // [NEW] Host handles PvE damage
+        getEntHit((data, peerId) => {
+            if (this.isHost) {
+                const targets = [...this.game.npcs, ...this.game.animals, ...this.game.boats];
+                const target = targets.find(e => e.id === data.id);
+                if (target) {
+                    target.hp -= data.dmg;
+                    this.game.spawnParticles(target.x, target.y, '#f00', 5);
+                }
+            }
+        });
+    }
+
+    syncList(localList, dataList, type) {
+        if (!dataList) return;
+        const incomingIds = new Set(dataList.map(e => e.i));
+
+        dataList.forEach(d => {
+            let entity = localList.find(e => e.id === d.i);
+            if (!entity) {
+                if (type === 'sheep') entity = new Sheep(d.x, d.y);
+                else if (type === 'boat') entity = new Boat(d.x, d.y, d.o);
+                else if (type === 'loot') entity = { id: d.i, x: d.x, y: d.y, id: d.t, qty: d.q, bob: Math.random()*100 };
+                else entity = new Entity(d.x, d.y, 'npc');
+                
+                if (type !== 'loot') entity.id = d.i;
+                localList.push(entity);
+            }
+            
+            if (type === 'loot') return; // Loot doesn't move/update once spawned
+
+            const dx = d.x - entity.x;
+            const dy = d.y - entity.y;
+            
+            if (Math.abs(dx) > 100 || Math.abs(dy) > 100) {
+                entity.x = d.x; entity.y = d.y;
+            } else {
+                entity.x += dx * 0.2;
+                entity.y += dy * 0.2;
+            }
+            
+            entity.hp = d.h;
+            
+            if (type === 'sheep') {
+                entity.fed = d.f;
+                entity.hasWool = d.w;
+                entity.isMoving = (Math.abs(dx) > 1 || Math.abs(dy) > 1);
+            } else if (type === 'boat') {
+                if (d.bs) entity.boatStats.heading = d.bs.h;
+                if (d.o) entity.owner = d.o; 
+            } else if (type === 'npc') {
+                entity.isMoving = (Math.abs(dx) > 1 || Math.abs(dy) > 1);
+            }
+        });
+
+        for (let i = localList.length - 1; i >= 0; i--) {
+            if (localList[i].id && !incomingIds.has(localList[i].id)) {
+                localList.splice(i, 1);
+            }
+        }
     }
 
     update(dt) {
-        // Send updates ~20 times per second
         if (Math.random() < 0.3) { 
             this.actions.sendPlayer({
                 x: Math.floor(this.game.player.x),
@@ -151,18 +237,29 @@ export default class Network {
                 mv: this.game.player.isMoving
             });
         }
-    }
 
-    // Helper: Client asks host to build
-    requestBuild(gx, gy, id) {
         if (this.isHost) {
-            this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
-        } else {
-            this.actions.sendTileReq({ x: gx, y: gy, id: id, type: 'build' });
+             const now = Date.now();
+             if (now - this.lastEntSync > 50) { 
+                 this.lastEntSync = now;
+                 
+                 const n = this.game.npcs.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp }));
+                 const a = this.game.animals.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
+                 const b = this.game.boats.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
+                 
+                 // Sync Loot (t=type/tileId, q=qty)
+                 const l = this.game.loot.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), t: e.id, q: e.qty }));
+
+                 this.actions.sendEnts({ n, a, b, l });
+             }
         }
     }
 
-    // Helper: Client asks host to remove/harvest
+    requestBuild(gx, gy, id) {
+        if (this.isHost) this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
+        else this.actions.sendTileReq({ x: gx, y: gy, id: id, type: 'build' });
+    }
+
     requestRemove(gx, gy, restoreId) {
         if (this.isHost) {
             this.game.world.setTile(gx, gy, restoreId);
@@ -172,14 +269,10 @@ export default class Network {
         }
     }
 
-    // Helper: Host broadcasts their own build
     broadcastBuild(gx, gy, id) {
-        if (this.isHost) {
-            this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
-        }
+        if (this.isHost) this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
     }
 
-    // Helper: Send PvP damage
     sendHit(peerId, damage) {
         this.actions.sendDamage(damage, peerId);
     }
