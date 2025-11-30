@@ -77,6 +77,7 @@ export default class Network {
                     this.game.player.x = data.spawnX + offsetX;
                     this.game.player.y = data.spawnY + offsetY;
                 }
+                this.game.recalcCannons();
             }
         });
 
@@ -104,14 +105,17 @@ export default class Network {
                 if (data.type === 'build') {
                     if (this.game.tryBuild(data.x, data.y, data.id, false, false, true)) {
                         this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
+                        // [FIX] Update Host's cannon list immediately after authorizing a build
+                        this.game.recalcCannons(); 
                     }
                 } else if (data.type === 'remove') {
-                     // [NEW] Host handles loot spawning for client actions
                      const currentId = this.game.world.getTile(data.x, data.y);
                      this.game.spawnTileLoot(data.x, data.y, currentId);
                      
                      this.game.world.setTile(data.x, data.y, data.id); 
                      this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
+                     // [FIX] Update Host's cannon list after removal (e.g. destroying a tower)
+                     this.game.recalcCannons();
                 }
             }
         });
@@ -120,6 +124,7 @@ export default class Network {
             if (data.action === 'set') {
                 this.game.world.setTile(data.x, data.y, data.id);
                 this.game.spawnParticles(data.x * 32 + 16, data.y * 32 + 16, '#fff', 5);
+                this.game.recalcCannons();
             }
         });
 
@@ -137,6 +142,15 @@ export default class Network {
                 this.syncList(this.game.animals, data.a, 'sheep');
                 this.syncList(this.game.boats, data.b, 'boat');
                 this.syncList(this.game.loot, data.l, 'loot'); 
+                
+                if (data.c) {
+                    data.c.forEach(remoteCannon => {
+                        const localCannon = this.game.cannons.find(c => c.key === remoteCannon.k);
+                        if (localCannon) {
+                            localCannon.ammo = remoteCannon.a;
+                        }
+                    });
+                }
             }
         });
 
@@ -163,6 +177,20 @@ export default class Network {
                 } else if (data.act === 'pickup') {
                     const idx = this.game.loot.findIndex(l => l.uid === data.id);
                     if (idx !== -1) this.game.loot.splice(idx, 1);
+                } else if (data.act === 'refill') {
+                    const cannon = this.game.cannons.find(c => c.key === data.id);
+                    if (cannon) {
+                        cannon.ammo += 5;
+                        this.game.spawnParticles(cannon.x, cannon.y, '#00ffff', 5);
+                    } else {
+                        // Fallback: If cannon not found, try forcing a recalc and checking again
+                        this.game.recalcCannons();
+                        const retry = this.game.cannons.find(c => c.key === data.id);
+                        if(retry) {
+                            retry.ammo += 5;
+                            this.game.spawnParticles(retry.x, retry.y, '#00ffff', 5);
+                        }
+                    }
                 }
             }
         });
@@ -184,7 +212,6 @@ export default class Network {
         const incomingIds = new Set(dataList.map(e => e.i));
 
         dataList.forEach(d => {
-            // [FIXED] For loot, we check against UID. For entities, we check against ID.
             const isLoot = (type === 'loot');
             let entity = localList.find(e => (isLoot ? e.uid : e.id) === d.i);
             
@@ -225,7 +252,6 @@ export default class Network {
         });
 
         for (let i = localList.length - 1; i >= 0; i--) {
-            // [FIXED] Check UID for loot, ID for entities
             const currentId = (type === 'loot') ? localList[i].uid : localList[i].id;
             if (currentId && !incomingIds.has(currentId)) {
                 localList.splice(i, 1);
@@ -253,11 +279,11 @@ export default class Network {
                  const n = this.game.npcs.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp }));
                  const a = this.game.animals.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
                  const b = this.game.boats.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
-                 
-                 // [FIXED] Map loot to include UID as 'i' and Item Type as 't'
                  const l = this.game.loot.map(e => ({ i: e.uid, x: Math.round(e.x), y: Math.round(e.y), t: e.id, q: e.qty }));
+                 
+                 const c = this.game.cannons.map(t => ({ k: t.key, a: t.ammo }));
 
-                 this.actions.sendEnts({ n, a, b, l });
+                 this.actions.sendEnts({ n, a, b, l, c });
              }
         }
     }
@@ -269,12 +295,14 @@ export default class Network {
 
     requestRemove(gx, gy, restoreId) {
         if (this.isHost) {
-            // [NEW] Host handles loot spawning for local actions
             const currentId = this.game.world.getTile(gx, gy);
             this.game.spawnTileLoot(gx, gy, currentId);
             
             this.game.world.setTile(gx, gy, restoreId);
             this.actions.sendTileUpd({ x: gx, y: gy, id: restoreId, action: 'set' });
+            
+            // [FIX] Recalc cannons if host removes tower locally
+            this.game.recalcCannons();
         } else {
             this.actions.sendTileReq({ x: gx, y: gy, id: restoreId, type: 'remove' });
         }

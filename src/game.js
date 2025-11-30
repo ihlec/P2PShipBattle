@@ -243,7 +243,6 @@ export default class Game {
         this.ui.update();
     }
 
-    // [FIXED] Uses 'uid' for Network ID to avoid collision with 'id' (Item Type)
     spawnTileLoot(gx, gy, tileId) {
         const tx = gx * CONFIG.TILE_SIZE + 16;
         const ty = gy * CONFIG.TILE_SIZE + 16;
@@ -335,8 +334,15 @@ export default class Game {
             if (cannon && this.player.selectedTile === TILES.IRON.id) {
                 if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
                     if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
-                    cannon.ammo += 5;
-                    this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
+                    
+                    if (this.network.isHost) {
+                        cannon.ammo += 5;
+                        this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
+                    } else {
+                        // Network Request for Refill
+                        this.network.actions.sendEntReq({ id: cannon.key, act: 'refill' });
+                        this.spawnText(cannon.x, cannon.y, "REFILLING...", "#00ffff");
+                    }
                     this.ui.update();
                     return;
                 }
@@ -622,27 +628,44 @@ export default class Game {
         return true;
     }
 
+    // [FIXED] Updated to scan around ALL connected players (viewers)
     recalcCannons() {
         const range = 30;
-        const px = Math.floor(this.player.x / CONFIG.TILE_SIZE);
-        const py = Math.floor(this.player.y / CONFIG.TILE_SIZE);
-        const newCannons = [];
-        for (let y = py - range; y < py + range; y++) {
-            for (let x = px - range; x < px + range; x++) {
-                const id = this.world.getTile(x, y);
-                const tile = ID_TO_TILE[id];
-                if (tile.isTower) {
+        const activeCannons = new Map();
+
+        // 1. Define Viewers (Host + all Peers)
+        const viewers = [this.player, ...Object.values(this.peers)];
+
+        viewers.forEach(p => {
+            const px = Math.floor(p.x / CONFIG.TILE_SIZE);
+            const py = Math.floor(p.y / CONFIG.TILE_SIZE);
+
+            for (let y = py - range; y < py + range; y++) {
+                for (let x = px - range; x < px + range; x++) {
                     const key = `${x},${y}`;
-                    let damage = tile.cannonDamage || 20;
-                    const existing = this.cannons.find(c => c.key === key);
-                    newCannons.push({
-                        key, x: x*CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2, y: y*CONFIG.TILE_SIZE + CONFIG.TILE_SIZE/2,
-                        damage, cooldown: existing ? existing.cooldown : 0, ammo: existing ? existing.ammo : 10, range: 300
-                    });
+                    if (activeCannons.has(key)) continue; // Already processed
+
+                    const id = this.world.getTile(x, y);
+                    const tile = ID_TO_TILE[id];
+                    if (tile && tile.isTower) {
+                        let damage = tile.cannonDamage || 20;
+                        const existing = this.cannons.find(c => c.key === key);
+                        
+                        activeCannons.set(key, {
+                            key, 
+                            x: x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2, 
+                            y: y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2,
+                            damage, 
+                            cooldown: existing ? existing.cooldown : 0, 
+                            ammo: existing ? existing.ammo : 10, 
+                            range: 300
+                        });
+                    }
                 }
             }
-        }
-        this.cannons = newCannons;
+        });
+
+        this.cannons = Array.from(activeCannons.values());
     }
 
     spawnText(x, y, txt, col) { 

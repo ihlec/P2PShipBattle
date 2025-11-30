@@ -1,7 +1,9 @@
 
 ## TODO
-- missing sheeps and ships for non host players
-- non host players keep spawning in water. They should respawn on land
+- invasion on land using NPC land units
+
 - stat-box should only show Room and POS
 
-- invasion on land using NPC land units
+- show ammo for both players
+
+- boats by host only????
