@@ -812,8 +812,14 @@ export default class Game {
         }
 
         if (this.network.isHost) {
-             const enemyBoat = this.boats.find(b => b.owner === 'enemy');
-             if (!enemyBoat) {
+            // [CHANGED] Find ALL enemy boats
+            const enemyBoats = this.boats.filter(b => b.owner === 'enemy');
+            
+            // 1. Update existing enemy boat AI
+            enemyBoats.forEach(b => b.updateAI(dt, this.player, this.world, this));
+
+            // 2. Spawn logic: Allow up to 2 boats
+            if (enemyBoats.length < 2) { 
                 this.invasionTimer++;
                 if (this.invasionTimer > this.nextInvasionTime) {
                     if (Math.random() < 0.1) { 
@@ -821,8 +827,6 @@ export default class Game {
                         const dist = 600 + Math.random() * 200;
                         const sx = this.player.x + Math.cos(angle) * dist;
                         const sy = this.player.y + Math.sin(angle) * dist;
-                        const gx = Math.floor(sx / CONFIG.TILE_SIZE);
-                        const gy = Math.floor(sy / CONFIG.TILE_SIZE);
                         const checkWater = (cx, cy) => {
                             const tile = this.world.getTile(Math.floor(cx/CONFIG.TILE_SIZE), Math.floor(cy/CONFIG.TILE_SIZE));
                             return tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id;
@@ -837,10 +841,9 @@ export default class Game {
                         }
                     }
                 }
-             } else {
-                 this.invasionTimer = 0;
-                 enemyBoat.updateAI(dt, this.player, this.world, this);
-             }
+            } else {
+                 this.invasionTimer = 0; // Cap reached
+            }
              
              // [NEW] Centralized Host AI Logic
              this.updateHostAI(dt);
