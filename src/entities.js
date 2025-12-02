@@ -54,7 +54,6 @@ export class Entity {
         this.id = Math.random().toString(36).substr(2, 9);
         this.x = x; 
         this.y = y; 
-        // [NEW] Interpolation Targets
         this.targetX = x;
         this.targetY = y;
         
@@ -76,7 +75,7 @@ export class Entity {
         
         this.boatStats = { 
             heading: 0, 
-            targetHeading: 0, // [NEW] Interpolation Target for Rotation
+            targetHeading: 0,
             speed: 0, 
             rudder: 0, 
             sailLevel: 0, 
@@ -268,29 +267,36 @@ export class Boat extends Entity {
         this.maxHp = 100;
         this.owner = owner;
         this.inBoat = true; 
-        this.isLanded = false;
-        this.activeMinion = null; 
+        
+        // Invasion Logic
+        this.minions = [];
+        this.maxMinions = 3; 
         this.respawnTimer = 0;
-        this.nextRespawnTime = 0; 
-        this.travelTimer = (this.owner === 'enemy') ? 1800 + Math.random() * 16200 : 0;
+        // Random start time to stagger multiple boats
+        this.nextRespawnTime = 300 + Math.random() * 300; 
     }
 
     updateAI(dt, player, world, game) {
         if (this.owner !== 'enemy') return;
+
+        // --- 1. MOVEMENT & COMBAT ---
         const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
         const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
         const tile = world.getTile(gx, gy);
         const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
-        if (!this.isLanded && isWater) {
+
+        if (isWater) {
             const dist = Utils.distance(this, player);
             const input = { up: false, down: false, left: false, right: false };
             const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
             let heading = this.boatStats.heading % (Math.PI * 2);
             if (heading > Math.PI) heading -= Math.PI * 2;
             if (heading < -Math.PI) heading += Math.PI * 2;
+            
             let desiredAngle = angleToPlayer;
             const BROADSIDE_RANGE = 300;
             const MIN_RANGE = 150;
+            
             if (dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
                 let relative = angleToPlayer - heading;
                 while (relative > Math.PI) relative -= Math.PI * 2;
@@ -298,6 +304,7 @@ export class Boat extends Entity {
                 if (relative > 0) desiredAngle = angleToPlayer - Math.PI/2; 
                 else desiredAngle = angleToPlayer + Math.PI/2; 
             }
+            
             const windDir = world.wind.angle;
             let windDiff = Math.cos(windDir - desiredAngle);
             if (windDiff < -0.5) {
@@ -308,9 +315,11 @@ export class Boat extends Entity {
                 }
                 desiredAngle = windDir + (Math.PI * 0.75 * this.aiState.tackState);
             }
+            
             let diff = desiredAngle - heading;
             while (diff > Math.PI) diff -= Math.PI * 2;
             while (diff < -Math.PI) diff += Math.PI * 2;
+            
             if (Math.abs(diff) > 0.1) {
                 if (diff > 0) input.right = true;
                 else input.left = true;
@@ -318,67 +327,78 @@ export class Boat extends Entity {
             if (Math.abs(diff) < 1.0) input.up = true; 
             else if (Math.abs(diff) > 2.0) input.down = true; 
             else input.up = false; 
+            
             this.updateBoatMovement(input, dt, world, game);
+            
             let angleRelative = angleToPlayer - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
             while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
             const broadsideThreshold = 0.3; 
             if (Math.abs(angleRelative - (-Math.PI/2)) < broadsideThreshold) this.shootBroadside(game, 'left');
             if (Math.abs(angleRelative - (Math.PI/2)) < broadsideThreshold) this.shootBroadside(game, 'right');
-        } else if (this.isLanded) {
-            const minionAlive = this.activeMinion && this.activeMinion.hp > 0 && game.npcs.includes(this.activeMinion);
-            if (!minionAlive) {
-                this.respawnTimer++;
-                if (this.respawnTimer > this.nextRespawnTime) {
-                    const angle = Math.atan2(player.y - this.y, player.x - this.x);
-                    let spawnX = this.x;
-                    let spawnY = this.y;
-                    let validSpotFound = false;
-                    for(let d = 32; d <= 96; d += 16) {
-                        const angles = [0, -0.6, 0.6, -1.2, 1.2]; 
-                        for(let a of angles) {
-                            const checkAngle = angle + a;
-                            const tx = this.x + Math.cos(checkAngle) * d;
-                            const ty = this.y + Math.sin(checkAngle) * d;
-                            const gx = Math.floor(tx / CONFIG.TILE_SIZE);
-                            const gy = Math.floor(ty / CONFIG.TILE_SIZE);
-                            if (!world.isSolid(gx, gy)) {
-                                const t = world.getTile(gx, gy);
-                                if (t !== TILES.WATER.id && t !== TILES.DEEP_WATER.id) {
-                                    spawnX = tx;
-                                    spawnY = ty;
-                                    validSpotFound = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (validSpotFound) break;
-                    }
-                    if (validSpotFound) {
-                        const minion = new Entity(spawnX, spawnY, 'npc');
-                        game.npcs.push(minion);
-                        this.activeMinion = minion;
-                        game.spawnParticles(this.x, this.y, '#ff0000', 8);
-                        game.spawnText(this.x, this.y, "INVASION!", "#f00"); 
-                        this.respawnTimer = 0;
-                        const minFrames = 7200;
-                        const maxFrames = 72000;
-                        this.nextRespawnTime = minFrames + Math.random() * (maxFrames - minFrames);
-                    } else {
-                         this.respawnTimer -= 100;
-                    }
+        }
+
+        // --- 2. INVASION LOGIC (Amphibious Assault) ---
+        // Clean up dead minions
+        this.minions = this.minions.filter(m => m.hp > 0 && game.npcs.includes(m));
+
+        if (this.minions.length < this.maxMinions) {
+            // Speed up spawn if we are far away (assume we can't reach player via water)
+            const dist = Utils.distance(this, player);
+            let spawnRate = 1;
+            if (dist > 400) spawnRate = 3; // Aggressive spawning if distant
+
+            this.respawnTimer += spawnRate;
+            
+            if (this.respawnTimer > this.nextRespawnTime) {
+                if (this.trySpawnMinion(game, world)) {
+                    this.respawnTimer = 0;
+                    // Randomize next spawn time (10s to 30s base)
+                    this.nextRespawnTime = 600 + Math.random() * 1200; 
+                    game.spawnText(this.x, this.y, "UNITS DEPLOYED", "#f00");
                 }
             }
-        } else {
-            const angle = Math.atan2(player.y - this.y, player.x - this.x);
-            const prevX = this.x;
-            const prevY = this.y;
-            this.move(Math.cos(angle) * 1.0, Math.sin(angle) * 1.0, world); 
-            if (Math.abs(this.x - prevX) < 0.1 && Math.abs(this.y - prevY) < 0.1) {
-                this.isLanded = true;
-                this.boatStats.speed = 0; 
-                game.spawnText(this.x, this.y, "LANDED!", "#f00");
-            }
         }
+    }
+    
+    trySpawnMinion(game, world) {
+        // Try to find a valid land tile within a decent range
+        const range = 200;
+        let attempts = 0;
+        
+        while(attempts < 15) {
+            // Pick a random spot around the boat
+            const angle = Math.random() * Math.PI * 2;
+            // Spawn distance: not too close to boat (so they land on shore), not too far
+            const dist = 60 + Math.random() * (range - 60);
+            
+            const tx = this.x + Math.cos(angle) * dist;
+            const ty = this.y + Math.sin(angle) * dist;
+            
+            const gx = Math.floor(tx / CONFIG.TILE_SIZE);
+            const gy = Math.floor(ty / CONFIG.TILE_SIZE);
+            
+            // Check if it's NOT solid and NOT water (i.e., walkable land)
+            if (!world.isSolid(gx, gy)) {
+                const t = world.getTile(gx, gy);
+                const isWater = (t === TILES.WATER.id || t === TILES.DEEP_WATER.id);
+                
+                if (!isWater) {
+                    // Valid invasion point found!
+                    const minion = new Entity(tx, ty, 'npc');
+                    minion.hp = 60; // Slightly tougher than standard
+                    minion.activeMelee = TILES.SWORD_WOOD.id; // Armed!
+                    
+                    this.minions.push(minion);
+                    game.npcs.push(minion);
+                    
+                    // Visual feedback
+                    game.spawnParticles(tx, ty, '#ff0000', 10);
+                    return true;
+                }
+            }
+            attempts++;
+        }
+        return false;
     }
 }
