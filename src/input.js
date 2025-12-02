@@ -8,7 +8,8 @@ export default class InputHandler {
         window.addEventListener('keydown', e => {
             this.keys[e.key.toLowerCase()] = true;
             if(e.key.toLowerCase() === 'escape') document.getElementById('blueprint-menu').style.display = 'none';
-            if(e.key.toLowerCase() === 'b') this.game.toggleBlueprints();
+            // [FIXED] Correctly calls the method on the UIManager instance
+            if(e.key.toLowerCase() === 'b') this.game.ui.toggleBlueprints(); 
         });
         window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
         window.addEventListener('mousemove', e => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; });

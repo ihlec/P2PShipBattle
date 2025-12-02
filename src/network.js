@@ -1,6 +1,6 @@
 import { joinRoom } from 'https://cdn.skypack.dev/trystero@0.15.1';
 import { Entity, Sheep, Boat } from './entities.js';
-import { CONFIG, TILES } from './config.js'; 
+import { CONFIG, TILES, ID_TO_TILE } from './config.js'; 
 
 export default class Network {
     constructor(game, roomId, isHost, playerName) {
@@ -10,19 +10,17 @@ export default class Network {
         this.playerName = playerName;
         this.lastEntSync = 0;
         
-        // [FIXED] Explicitly list reliable WebRTC trackers to avoid connection failures
         const config = { 
             appId: 'pixel-warfare-v2',
             trackerUrls: [
                 'wss://tracker.openwebtorrent.com',
                 'wss://tracker.btorrent.xyz',
                 'wss://tracker.webtorrent.dev',
-                'wss://tracker.files.fm:7073/announce' // Keeping original but prioritizing others
+                'wss://tracker.files.fm:7073/announce' 
             ]
         };
         this.room = joinRoom(config, roomId);
 
-        // --- ACTIONS ---
         const [sendInit, getInit] = this.room.makeAction('init');
         const [sendWorld, getWorld] = this.room.makeAction('world');
         const [sendPlayer, getPlayer] = this.room.makeAction('player');
@@ -38,11 +36,9 @@ export default class Network {
             sendDamage, sendEnts, sendEntReq, sendEntHit 
         };
 
-        // --- EVENTS ---
         this.room.onPeerJoin(peerId => {
             console.log(`Peer joined: ${peerId}`);
             if (this.isHost) {
-                // [CHANGED] Send the host's fixed spawn point, not current player location
                 this.actions.sendWorld({
                     seed: this.game.world.seed,
                     modified: this.game.world.modifiedTiles,
@@ -59,7 +55,6 @@ export default class Network {
             delete this.game.peers[peerId];
         });
 
-        // --- HANDLERS ---
         getInit((data, peerId) => {
             if (!this.game.peers[peerId]) {
                 this.game.peers[peerId] = { 
@@ -80,15 +75,11 @@ export default class Network {
                     modifiedTiles: data.modified,
                     time: data.time
                 });
-                
                 if (data.spawnX && data.spawnY) {
-                    // Update player position (with slight offset to prevent stacking)
                     const offsetX = (Math.random() - 0.5) * 128;
                     const offsetY = (Math.random() - 0.5) * 128;
                     this.game.player.x = data.spawnX + offsetX;
                     this.game.player.y = data.spawnY + offsetY;
-
-                    // [CHANGED] Update local spawnPoint so respawn() uses the correct location
                     this.game.spawnPoint = { x: data.spawnX, y: data.spawnY };
                 }
                 this.game.recalcCannons();
@@ -103,8 +94,6 @@ export default class Network {
                 p.hp = data.hp; p.isMoving = data.mv;
                 if(data.mv) p.moveTime += 16; 
                 if (p.x === 0 && p.y === 0) { p.x = data.x; p.y = data.y; }
-                
-                // [FIX] Boat rotation interpolation for peers
                 if (data.bh !== undefined && p.boatStats) {
                     p.boatStats.targetHeading = data.bh;
                 } else if (data.bh !== undefined) {
@@ -138,6 +127,29 @@ export default class Network {
                      this.game.world.setTile(data.x, data.y, data.id); 
                      this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
                      this.game.recalcCannons();
+                } else if (data.type === 'damage') { 
+                    const tileId = this.game.world.getTile(data.x, data.y);
+                    const tileDef = ID_TO_TILE[tileId];
+                    if (!tileDef || !tileDef.hp) return; 
+                    
+                    const totalDmg = this.game.world.hitTile(data.x, data.y, data.dmg);
+                    const tx = data.x * CONFIG.TILE_SIZE + 16;
+                    const ty = data.y * CONFIG.TILE_SIZE + 16;
+                    this.game.spawnParticles(tx, ty, '#777', 3);
+                    this.game.spawnText(tx, ty, `-${data.dmg}`, '#fff');
+
+                    if (totalDmg >= tileDef.hp) {
+                        const biome = Utils.getBiome(data.x, data.y, this.game.world.seed);
+                        let restoreId = TILES.GRASS.id;
+                        if (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) restoreId = biome;
+                        if (biome === TILES.SAND.id) restoreId = TILES.SAND.id;
+
+                        this.game.network.requestRemove(data.x, data.y, restoreId);
+                        this.game.spawnParticles(tx, ty, '#555', 10);
+                        this.game.recalcCannons();
+                    } else {
+                        this.broadcastTileHit(data.x, data.y, data.dmg);
+                    }
                 }
             }
         });
@@ -147,6 +159,11 @@ export default class Network {
                 this.game.world.setTile(data.x, data.y, data.id);
                 this.game.spawnParticles(data.x * 32 + 16, data.y * 32 + 16, '#fff', 5);
                 this.game.recalcCannons();
+            } else if (data.action === 'hit') { 
+                this.game.world.hitTile(data.x, data.y, data.id); 
+                const tx = data.x * CONFIG.TILE_SIZE + 16;
+                const ty = data.y * CONFIG.TILE_SIZE + 16;
+                this.game.spawnParticles(tx, ty, '#777', 3);
             }
         });
 
@@ -162,7 +179,7 @@ export default class Network {
             if (!this.isHost) {
                 this.syncList(this.game.npcs, data.n, 'npc');
                 this.syncList(this.game.animals, data.a, 'sheep');
-                this.syncList(this.game.boats, data.b, 'boat'); // This will now correctly remove the boat if the host removed it
+                this.syncList(this.game.boats, data.b, 'boat'); 
                 this.syncList(this.game.loot, data.l, 'loot'); 
                 
                 if (data.c) {
@@ -206,16 +223,12 @@ export default class Network {
                         this.game.spawnParticles(cannon.x, cannon.y, '#00ffff', 5);
                     }
                 } else if (data.act === 'spawnBoat') {
-                    // Triggered when client BUILDS or EXITS a boat
                     this.game.boats.push(new Boat(data.x, data.y));
                     this.game.spawnParticles(data.x, data.y, '#8B4513', 8);
                 } else if (data.act === 'enterBoat') {
-                    // [NEW] Triggered when client ENTERS a boat
-                    // Host removes the boat entity so it stops syncing to others
                     const idx = this.game.boats.findIndex(b => b.id === data.id);
                     if (idx !== -1) {
                         this.game.boats.splice(idx, 1);
-                        // Optional: Could send a confirmation, but syncList handles cleanup on next tick
                     }
                 }
             }
@@ -257,7 +270,6 @@ export default class Network {
             
             if (isLoot) return; 
 
-            // Update Targets
             entity.targetX = d.x;
             entity.targetY = d.y;
             
@@ -280,7 +292,6 @@ export default class Network {
             }
         });
 
-        // [FIXED] Aggressive cleanup: If the server didn't send it, DELETE IT.
         for (let i = localList.length - 1; i >= 0; i--) {
             const currentId = (type === 'loot') ? localList[i].uid : localList[i].id;
             if (currentId && !incomingIds.has(currentId)) {
@@ -340,6 +351,12 @@ export default class Network {
 
     broadcastBuild(gx, gy, id) {
         if (this.isHost) this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
+    }
+
+    broadcastTileHit(gx, gy, damage) {
+        if (this.isHost) {
+            this.actions.sendTileUpd({ x: gx, y: gy, id: damage, action: 'hit' });
+        }
     }
 
     sendHit(peerId, damage) {

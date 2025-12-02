@@ -9,6 +9,13 @@ export const CONFIG = {
     MAX_NPCS: 30,
     WOOL_REGROW_TIME: 36000,
     
+    // [NEW] NPC RAMMING CONFIG
+    NPC_RAM: {
+        DAMAGE_STRUCTURE: 30, // Damage dealt to a Wall/Tower on impact
+        DAMAGE_BOAT: 50,      // Damage dealt to a Player Boat on impact
+        COOLDOWN: 120         // Frames between ramming impacts (2 seconds)
+    },
+    
     // [NEW] Wave Sync Timer (ms)
     WAVE_INTERVAL: 45000, 
     
