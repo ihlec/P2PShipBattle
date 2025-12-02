@@ -842,52 +842,8 @@ export default class Game {
                  enemyBoat.updateAI(dt, this.player, this.world, this);
              }
              
-             this.npcs.forEach(npc => {
-                if (!npc.aiState) npc.aiState = { mode: 'chase', tx: 0, ty: 0, timer: 0 };
-                if (npc.aiState.timer > 0) {
-                    npc.aiState.timer--;
-                    npc.isMoving = false;
-                } else if (npc.aiState.mode === 'chase') {
-                    const dist = Utils.distance(npc, this.player);
-                    if (dist < 80) {
-                        npc.aiState.mode = 'charge';
-                        const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
-                        npc.aiState.tx = this.player.x + Math.cos(angle) * 150;
-                        npc.aiState.ty = this.player.y + Math.sin(angle) * 150;
-                    } else {
-                        const angle = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
-                        npc.move(Math.cos(angle) * 2, Math.sin(angle) * 2, this.world);
-                        npc.isMoving = true;
-                        npc.moveTime += dt;
-                    }
-                } else if (npc.aiState.mode === 'charge') {
-                    const dx = npc.aiState.tx - npc.x;
-                    const dy = npc.aiState.ty - npc.y;
-                    const distToTarget = Math.sqrt(dx*dx + dy*dy);
-                    if (distToTarget < 10) {
-                        npc.aiState.mode = 'rest';
-                        npc.aiState.timer = 60 + Math.random() * 60; 
-                    } else {
-                        const angle = Math.atan2(dy, dx);
-                        npc.move(Math.cos(angle) * 3.5, Math.sin(angle) * 3.5, this.world);
-                        npc.isMoving = true;
-                        npc.moveTime += dt;
-                    }
-                } else if (npc.aiState.mode === 'rest') {
-                    npc.aiState.mode = 'chase';
-                }
-                if (Utils.distance(npc, this.player) < CONFIG.TILE_SIZE) {
-                    if (!this.godMode) {
-                        this.player.damageBuffer += 0.5; 
-                        if (this.player.damageBuffer >= 1) {
-                            const dmg = Math.floor(this.player.damageBuffer);
-                            this.player.hp -= dmg;
-                            this.player.damageBuffer -= dmg;
-                            if (Math.random() > 0.8) this.spawnParticles(this.player.x, this.player.y, '#f00', 2);
-                        }
-                    }
-                }
-             });
+             // [NEW] Centralized Host AI Logic
+             this.updateHostAI(dt);
         }
 
         if (this.network.isHost && this.animals.length < 10 && Math.random() < 0.005) {
@@ -1061,6 +1017,151 @@ export default class Game {
         this.input.flush();
     }
     
+    // [NEW] Logic to handle NPCs switching targets (Players, Boats, Buildings)
+    updateHostAI(dt) {
+        this.npcs.forEach(npc => {
+            if (!npc.aiState) npc.aiState = { mode: 'chase', tx: 0, ty: 0, timer: 0, target: null };
+            
+            // 1. Target Selection (Re-evaluate every ~60 frames or if no target)
+            if (!npc.aiState.target || npc.aiState.timer <= 0) {
+                npc.aiState.target = this.findClosestTarget(npc);
+                npc.aiState.timer = 60 + Math.random() * 30; // Randomize to prevent synchronous thinking
+            }
+            npc.aiState.timer--;
+
+            // 2. State Machine
+            const target = npc.aiState.target;
+
+            if (!target) {
+                npc.aiState.mode = 'rest'; // No targets? Chill.
+            } else if (npc.aiState.mode === 'chase') {
+                const dist = Utils.distance(npc, target);
+                
+                // If close enough, switch to CHARGE
+                if (dist < 80) {
+                    npc.aiState.mode = 'charge';
+                    // Predict location slightly
+                    const angle = Math.atan2(target.y - npc.y, target.x - npc.x);
+                    npc.aiState.tx = target.x + Math.cos(angle) * 150; // Overshoot target
+                    npc.aiState.ty = target.y + Math.sin(angle) * 150;
+                } else {
+                    // Path to target
+                    const angle = Math.atan2(target.y - npc.y, target.x - npc.x);
+                    npc.move(Math.cos(angle) * 2, Math.sin(angle) * 2, this.world);
+                    npc.isMoving = true;
+                    npc.moveTime += dt;
+                }
+            } else if (npc.aiState.mode === 'charge') {
+                const dx = npc.aiState.tx - npc.x;
+                const dy = npc.aiState.ty - npc.y;
+                const distToDest = Math.sqrt(dx*dx + dy*dy);
+                
+                // Attack Check
+                if (target) this.tryHostAttack(npc, target);
+
+                if (distToDest < 10) {
+                    npc.aiState.mode = 'rest';
+                    npc.aiState.timer = 45; // Pause after charge
+                } else {
+                    const angle = Math.atan2(dy, dx);
+                    npc.move(Math.cos(angle) * 3.5, Math.sin(angle) * 3.5, this.world);
+                    npc.isMoving = true;
+                    npc.moveTime += dt;
+                }
+            } else if (npc.aiState.mode === 'rest') {
+                // Wait for timer to tick down (handled at top) then switch back to chase
+                if (npc.aiState.timer <= 0) npc.aiState.mode = 'chase';
+                npc.isMoving = false;
+            }
+        });
+    }
+
+    findClosestTarget(npc) {
+        let closest = null;
+        let minDst = 600; // Agro Range
+
+        // A. Check Players (Host + Peers)
+        const players = [this.player, ...Object.values(this.peers)];
+        players.forEach(p => {
+            if (p.hp > 0 && !p.godMode) {
+                const d = Utils.distance(npc, p);
+                if (d < minDst) { minDst = d; closest = { type: 'entity', obj: p, x: p.x, y: p.y }; }
+            }
+        });
+
+        // B. Check Player Boats
+        this.boats.forEach(b => {
+            if (b.owner === 'player' && b.hp > 0) {
+                const d = Utils.distance(npc, b);
+                if (d < minDst) { minDst = d; closest = { type: 'entity', obj: b, x: b.x, y: b.y }; }
+            }
+        });
+
+        // C. Check Nearby Buildings (Walls/Towers)
+        // Optimization: Only scan 5x5 area around NPC for buildings
+        const gx = Math.floor(npc.x / CONFIG.TILE_SIZE);
+        const gy = Math.floor(npc.y / CONFIG.TILE_SIZE);
+        const range = 5;
+        for(let y = gy - range; y <= gy + range; y++) {
+            for(let x = gx - range; x <= gx + range; x++) {
+                const id = this.world.getTile(x, y);
+                const def = ID_TO_TILE[id];
+                // Target Towers, Walls, Doors
+                if (def && (def.isTower || id === TILES.WALL.id || id === TILES.WOOD_WALL.id)) {
+                    const tx = x * CONFIG.TILE_SIZE + 16;
+                    const ty = y * CONFIG.TILE_SIZE + 16;
+                    const d = Math.sqrt((tx - npc.x)**2 + (ty - npc.y)**2);
+                    if (d < minDst) {
+                         minDst = d; 
+                         closest = { type: 'tile', x: tx, y: ty, gx: x, gy: y, id: id };
+                    }
+                }
+            }
+        }
+        return closest;
+    }
+
+    tryHostAttack(npc, target) {
+        const dist = Math.sqrt((target.x - npc.x)**2 + (target.y - npc.y)**2);
+        if (dist < 40) { // Attack Range
+            // Damage Buffer Logic for Entities
+            if (!npc.damageBuffer) npc.damageBuffer = 0;
+            npc.damageBuffer += 0.5; // Attack speed
+
+            if (npc.damageBuffer >= 1) {
+                npc.damageBuffer = 0;
+                const dmg = 5; // Base Damage
+
+                if (target.type === 'entity') {
+                    const ent = target.obj;
+                    if (ent.hp > 0) {
+                        if (ent === this.player) {
+                             if(!this.godMode) this.player.hp -= dmg;
+                        } else if (ent.type === 'peer') {
+                             this.network.sendHit(ent.id, dmg);
+                        } else {
+                             // Boat or Animal
+                             ent.hp -= dmg;
+                        }
+                        this.spawnParticles(ent.x, ent.y, '#f00', 2);
+                    }
+                } else if (target.type === 'tile') {
+                    // Attack Building
+                    const totalDmg = this.world.hitTile(target.gx, target.gy, dmg * 5); // Bonus dmg to walls
+                    this.spawnParticles(target.x, target.y, '#777', 3);
+                    
+                    // Check Destruction
+                    const def = ID_TO_TILE[target.id];
+                    if (def && def.hp && totalDmg >= def.hp) {
+                         this.network.requestRemove(target.gx, target.gy, TILES.GRASS.id);
+                         this.spawnParticles(target.x, target.y, '#555', 10);
+                         this.recalcCannons();
+                    }
+                }
+            }
+        }
+    }
+
     updateMeleeCombat() {
         if (!this.player.isMoving || this.shootCooldown > 0) return;
         let dmg = 0;

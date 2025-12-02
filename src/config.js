@@ -9,6 +9,9 @@ export const CONFIG = {
     MAX_NPCS: 30,
     WOOL_REGROW_TIME: 36000,
     
+    // [NEW] Wave Sync Timer (ms)
+    WAVE_INTERVAL: 45000, 
+    
     DAY_CYCLE: {
         DURATION: 24000, 
         NIGHT_OPACITY: 0.95, 

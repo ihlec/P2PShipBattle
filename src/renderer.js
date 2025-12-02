@@ -188,7 +188,7 @@ export default class Renderer {
                         } else {
                             this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                             this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
-                            this.ctx.strokeRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
+                            // [MODIFIED] Removed grey border (strokeRect)
                         }
 
                     } else if (obj._type === 'sheep') {
@@ -196,8 +196,6 @@ export default class Renderer {
                     } else if (obj._type === 'player' || obj._type === 'peer') { 
                         const isPlayer = obj._type === 'player';
                         if (obj._orig.inBoat) {
-                            // [FIXED] Draw boat for BOTH player and peers.
-                            // We use obj._orig.boatStats.heading if available, otherwise 0.
                             const heading = (obj._orig.boatStats && obj._orig.boatStats.heading !== undefined) ? obj._orig.boatStats.heading : 0;
                             
                             this.drawBoat(obj.x, obj.y, heading, 'player', 100, 100, obj._orig);
@@ -218,6 +216,9 @@ export default class Renderer {
                                 this.drawHealth(obj._orig);
                             }
                         }
+                    } else if (obj._type === 'npc') {
+                         // [TODO] Force Black Color for NPCs
+                         this.drawCharacter(obj._orig, false, true); 
                     } else {
                         this.drawCharacter(obj._orig, false); 
                     }
@@ -541,11 +542,21 @@ export default class Renderer {
         this.drawHealth(obj); 
     }
 
-    drawCharacter(obj, isPlayer) { 
-        const colorShirt = isPlayer ? '#3498db' : '#993333';
-        const colorPants = isPlayer ? '#8B4513' : '#654321';
-        const colorSkin = isPlayer ? '#ffcc99' : '#e0b090';
-        const colorHelmet = '#8B6F43';
+    drawCharacter(obj, isPlayer, isEnemy = false) { 
+        // [TODO] Black color for NPC land units
+        let colorShirt, colorPants, colorSkin;
+
+        if (isEnemy) {
+            colorShirt = '#000000';
+            colorPants = '#111111';
+            colorSkin = '#222222';
+        } else {
+            colorShirt = isPlayer ? '#3498db' : '#993333';
+            colorPants = isPlayer ? '#8B4513' : '#654321';
+            colorSkin = isPlayer ? '#ffcc99' : '#e0b090';
+        }
+
+        const colorHelmet = isEnemy ? '#333' : '#8B6F43';
         const colorBoots = '#333333';
         const isMoving = obj.isMoving;
         const tick = isMoving ? (obj.moveTime * 0.015) : (Date.now() * 0.005);
@@ -580,7 +591,7 @@ export default class Renderer {
         this.ctx.fillStyle = colorHelmet;
         this.ctx.fillRect(obj.x - (HEAD_SIZE / 2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6);
         const heldId = obj.activeMelee;
-        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id) && isPlayer) {
+        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id) && (isPlayer || isEnemy)) {
             this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317';
             this.ctx.lineWidth = 3;
             const handX = obj.x + 10;
@@ -596,7 +607,7 @@ export default class Renderer {
         if (dir.x > 0) { eyeX1 += 2; eyeX2 += 2; }
         if (dir.x < 0) { eyeX1 -= 2; eyeX2 -= 2; }
         if (dir.y >= 0) {
-            this.ctx.fillStyle = '#000000';
+            this.ctx.fillStyle = isEnemy ? '#ff0000' : '#000000'; // Red eyes for enemies
             this.ctx.fillRect(eyeX1, HEAD_Y + 4, 3, 3);
             this.ctx.fillRect(eyeX2, HEAD_Y + 4, 3, 3);
         }

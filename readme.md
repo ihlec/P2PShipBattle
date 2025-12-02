@@ -1,6 +1,5 @@
 
 ## TODO
-- invasion on land using NPC land units
-- stat-box should only show Room and POS
-
+- If one does not kill off the boat, the second boat arrives after a while and will sync its attack wave with the first one.
+- npc land units should not get stuck when spwaning or when attacking
 

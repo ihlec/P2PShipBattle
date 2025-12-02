@@ -26,6 +26,13 @@ export class Projectile {
         return 'active';
     }
     draw(ctx, camX, camY) {
+        // [NEW] Shadow for Range Projectiles
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        // Draw shadow slightly below the projectile to simulate height
+        ctx.arc(this.x - camX, this.y - camY + 12, 4, 0, Math.PI * 2); 
+        ctx.fill();
+
         if (this.type === 'spear') {
             ctx.save();
             ctx.translate(this.x - camX, this.y - camY);
@@ -186,28 +193,62 @@ export class Entity {
             if (!check(nx + half, ny + half)) return false;
             return true;
         }
-        const attemptedX = this.x + dx;
-        const attemptedY = this.y + dy;
-        let collided = false;
-        if (verify(attemptedX, this.y)) this.x = attemptedX;
-        else { collided = true; this.velocity.x *= -0.5; }
-        if (verify(this.x, attemptedY)) this.y = attemptedY;
-        else { collided = true; this.velocity.y *= -0.5; }
+        
+        let attemptsX = this.x + dx;
+        let attemptsY = this.y + dy;
+        let moved = false;
+
+        // Try moving both axes
+        if (verify(attemptsX, attemptsY)) {
+            this.x = attemptsX;
+            this.y = attemptsY;
+            moved = true;
+        } else {
+            // [TODO] Improved Slide Logic to prevent stuck NPCs
+            // Try moving X only
+            if (verify(attemptsX, this.y)) {
+                this.x = attemptsX;
+                this.velocity.y *= 0; // Cancel blocked momentum
+                moved = true;
+            } 
+            // Try moving Y only
+            else if (verify(this.x, attemptsY)) {
+                this.y = attemptsY;
+                this.velocity.x *= 0; // Cancel blocked momentum
+                moved = true;
+            } 
+            else {
+                // Completely blocked
+                this.velocity.x *= -0.5;
+                this.velocity.y *= -0.5;
+                
+                // [FIX] If NPC is blocked, randomize direction briefly to unstuck
+                if (this.type === 'npc' && this.aiState) {
+                    this.aiState.mode = 'rest';
+                    this.aiState.timer = 30; // Pause for half a second
+                }
+            }
+        }
+
         const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
         const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
+        
+        // Safety push-out if trapped inside solid
         if (world.isSolid(gx, gy) && !this.inBoat && this.type !== 'boat') {
              const pushX = dx !== 0 ? Math.sign(dx) : (Math.random()-0.5);
              const pushY = dy !== 0 ? Math.sign(dy) : (Math.random()-0.5);
              this.x += pushX * 2;
              this.y += pushY * 2;
         }
-        if (dx !== 0 || dy !== 0) {
+
+        if (moved) {
             this.direction = { x: dx, y: dy };
             this.isMoving = true;
         } else if (this.type === 'player') {
             this.direction = { x: 0, y: 0 };
             this.isMoving = false;
         }
+
         const currentTile = world.getTile(gx, gy);
         if (this.inBoat) {
             if (currentTile === TILES.DEEP_WATER.id) this.speed = CONFIG.PLAYER_SPEED_DEEP_WATER;
@@ -269,11 +310,7 @@ export class Boat extends Entity {
         this.inBoat = true; 
         
         // Invasion Logic
-        this.minions = [];
-        this.maxMinions = 3; 
-        this.respawnTimer = 0;
-        // Random start time to stagger multiple boats
-        this.nextRespawnTime = 300 + Math.random() * 300; 
+        this.hasSpawnedWave = false;
     }
 
     updateAI(dt, player, world, game) {
@@ -338,39 +375,52 @@ export class Boat extends Entity {
             if (Math.abs(angleRelative - (Math.PI/2)) < broadsideThreshold) this.shootBroadside(game, 'right');
         }
 
-        // --- 2. INVASION LOGIC (Amphibious Assault) ---
-        // Clean up dead minions
-        this.minions = this.minions.filter(m => m.hp > 0 && game.npcs.includes(m));
+        // --- 2. WAVE SPAWN LOGIC (SYNCED) ---
+        this.updateWaveLogic(game, world);
+    }
 
-        if (this.minions.length < this.maxMinions) {
-            // Speed up spawn if we are far away (assume we can't reach player via water)
-            const dist = Utils.distance(this, player);
-            let spawnRate = 1;
-            if (dist > 400) spawnRate = 3; // Aggressive spawning if distant
+    updateWaveLogic(game, world) {
+        // [TODO] Waves of attacking land units, no continues spawning.
+        // [TODO] Sync attack waves with other boats.
+        // [TODO] No attacks in between.
+        
+        // Use Global Time for Sync
+        const now = Date.now();
+        const cycleLength = CONFIG.WAVE_INTERVAL || 30000; // e.g. 30 seconds
+        const spawnWindow = 2000; // 2 second window to spawn
 
-            this.respawnTimer += spawnRate;
-            
-            if (this.respawnTimer > this.nextRespawnTime) {
-                if (this.trySpawnMinion(game, world)) {
-                    this.respawnTimer = 0;
-                    // Randomize next spawn time (10s to 30s base)
-                    this.nextRespawnTime = 600 + Math.random() * 1200; 
-                    game.spawnText(this.x, this.y, "UNITS DEPLOYED", "#f00");
+        const positionInCycle = now % cycleLength;
+
+        if (positionInCycle < spawnWindow) {
+            // We are in the spawn window!
+            if (!this.hasSpawnedWave) {
+                // Spawn a batch!
+                let spawnedCount = 0;
+                for(let i=0; i<3; i++) { // Spawn 3 units per wave
+                    if (this.trySpawnMinion(game, world)) {
+                        spawnedCount++;
+                    }
                 }
+                if (spawnedCount > 0) {
+                    game.spawnText(this.x, this.y, "WAVE ATTACK!", "#ff0000");
+                }
+                this.hasSpawnedWave = true;
             }
+        } else {
+            // Outside spawn window, reset flag so next wave can trigger
+            this.hasSpawnedWave = false;
         }
     }
     
     trySpawnMinion(game, world) {
-        // Try to find a valid land tile within a decent range
-        const range = 200;
+        // [TODO] npc land units should not get stuck when spawning
+        // Improved logic: find a tile that is not solid, not water, AND has empty neighbors
+        const range = 250;
         let attempts = 0;
         
-        while(attempts < 15) {
-            // Pick a random spot around the boat
+        while(attempts < 20) {
             const angle = Math.random() * Math.PI * 2;
-            // Spawn distance: not too close to boat (so they land on shore), not too far
-            const dist = 60 + Math.random() * (range - 60);
+            const dist = 70 + Math.random() * (range - 70); // Ensure minimal distance from boat center
             
             const tx = this.x + Math.cos(angle) * dist;
             const ty = this.y + Math.sin(angle) * dist;
@@ -378,23 +428,39 @@ export class Boat extends Entity {
             const gx = Math.floor(tx / CONFIG.TILE_SIZE);
             const gy = Math.floor(ty / CONFIG.TILE_SIZE);
             
-            // Check if it's NOT solid and NOT water (i.e., walkable land)
+            // 1. Check strict solidity
             if (!world.isSolid(gx, gy)) {
                 const t = world.getTile(gx, gy);
                 const isWater = (t === TILES.WATER.id || t === TILES.DEEP_WATER.id);
                 
                 if (!isWater) {
-                    // Valid invasion point found!
-                    const minion = new Entity(tx, ty, 'npc');
-                    minion.hp = 60; // Slightly tougher than standard
-                    minion.activeMelee = TILES.SWORD_WOOD.id; // Armed!
+                    // 2. Check neighbors to ensure it's not a 1x1 island or hole
+                    let validNeighbors = 0;
+                    const neighborOffsets = [[0,1], [0,-1], [1,0], [-1,0]];
                     
-                    this.minions.push(minion);
-                    game.npcs.push(minion);
-                    
-                    // Visual feedback
-                    game.spawnParticles(tx, ty, '#ff0000', 10);
-                    return true;
+                    for (let off of neighborOffsets) {
+                        const nx = gx + off[0];
+                        const ny = gy + off[1];
+                        if (!world.isSolid(nx, ny)) {
+                            const nt = world.getTile(nx, ny);
+                            if (nt !== TILES.WATER.id && nt !== TILES.DEEP_WATER.id) {
+                                validNeighbors++;
+                            }
+                        }
+                    }
+
+                    if (validNeighbors >= 2) {
+                        // Valid invasion point found!
+                        const minion = new Entity(tx, ty, 'npc');
+                        minion.hp = 80; // Black Knights are tough
+                        minion.activeMelee = TILES.SWORD_IRON.id; 
+                        
+                        game.npcs.push(minion);
+                        
+                        // Visual feedback
+                        game.spawnParticles(tx, ty, '#000000', 12);
+                        return true;
+                    }
                 }
             }
             attempts++;

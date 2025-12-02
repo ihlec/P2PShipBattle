@@ -42,12 +42,13 @@ export default class Network {
         this.room.onPeerJoin(peerId => {
             console.log(`Peer joined: ${peerId}`);
             if (this.isHost) {
+                // [CHANGED] Send the host's fixed spawn point, not current player location
                 this.actions.sendWorld({
                     seed: this.game.world.seed,
                     modified: this.game.world.modifiedTiles,
                     time: this.game.world.time,
-                    spawnX: Math.floor(this.game.player.x),
-                    spawnY: Math.floor(this.game.player.y)
+                    spawnX: Math.floor(this.game.spawnPoint.x),
+                    spawnY: Math.floor(this.game.spawnPoint.y)
                 }, peerId);
             }
             this.actions.sendInit({ name: this.playerName }, peerId);
@@ -81,10 +82,14 @@ export default class Network {
                 });
                 
                 if (data.spawnX && data.spawnY) {
+                    // Update player position (with slight offset to prevent stacking)
                     const offsetX = (Math.random() - 0.5) * 128;
                     const offsetY = (Math.random() - 0.5) * 128;
                     this.game.player.x = data.spawnX + offsetX;
                     this.game.player.y = data.spawnY + offsetY;
+
+                    // [CHANGED] Update local spawnPoint so respawn() uses the correct location
+                    this.game.spawnPoint = { x: data.spawnX, y: data.spawnY };
                 }
                 this.game.recalcCannons();
             }
