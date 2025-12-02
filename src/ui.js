@@ -5,9 +5,7 @@ export default class UIManager {
     constructor(game) {
         this.game = game;
         this.dom = {
-            hp: document.getElementById('hp'),
             coords: document.getElementById('coords'),
-            seed: document.getElementById('seed-disp'),
             invBar: document.getElementById('inventory-bar'),
             wpnBar: document.getElementById('weapon-bar'),
             bpMenu: document.getElementById('blueprint-menu'),
@@ -16,8 +14,6 @@ export default class UIManager {
             activeWp: document.getElementById('active-weapon-display'),
             bpName: document.getElementById('current-bp-name'),
             wpName: document.getElementById('current-weapon-name'),
-            elev: document.getElementById('elev-disp'),
-            biome: document.getElementById('biome-disp'),
             roomId: document.getElementById('room-id-disp')
         };
         
@@ -178,23 +174,12 @@ export default class UIManager {
             this.dom.activeBp.style.display = 'none';
         }
         
-        // HUD text
-        this.dom.hp.innerText = Math.floor(this.game.player.hp);
+        // HUD text (Reduced)
         const px = Math.floor(this.game.player.x/CONFIG.TILE_SIZE);
         const py = Math.floor(this.game.player.y/CONFIG.TILE_SIZE);
         this.dom.coords.innerText = `${px}, ${py}`;
         
-        const currentElev = Utils.getElevation(px, py, this.game.world.seed);
-        const currentTileId = this.game.world.getTile(px, py);
-        this.dom.elev.innerText = currentElev.toFixed(2);
-        this.dom.biome.innerText = ID_TO_TILE[currentTileId].name;
-        
-        const t = this.game.world.time;
-        const hour = Math.floor(t * 24);
-        this.dom.biome.innerText += ` | ${hour}:00`;
-        
-        // Room ID & Seed [FIXED]
+        // Room ID
         this.dom.roomId.innerText = this.game.network.roomId;
-        this.dom.seed.innerText = this.game.world.seed; // Removed conditional check
     }
 }
