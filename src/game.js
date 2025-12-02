@@ -658,6 +658,14 @@ export default class Game {
             return true;
         }
 
+        // [FIX] Allow toggling fences (Wall <-> Open)
+        if ((current === TILES.WOOD_WALL.id && id === TILES.WOOD_WALL_OPEN.id) || 
+            (current === TILES.WOOD_WALL_OPEN.id && id === TILES.WOOD_WALL.id)) {
+            this.world.setTile(gx, gy, id);
+            if(this.network.isHost && !force) this.network.broadcastBuild(gx, gy, id);
+            return true;
+        }
+
         if (ID_TO_TILE[current].solid && current !== TILES.WATER.id && current !== TILES.DEEP_WATER.id) return false;
         
         this.world.setTile(gx, gy, id);
