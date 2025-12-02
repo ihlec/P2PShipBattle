@@ -203,6 +203,8 @@ export default class Game {
             const tileDef = ID_TO_TILE[tileId];
             if (tileDef.solid) return false;
             if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return false;
+            
+            // Check 8 neighbors to ensure plenty of space
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     const nid = this.world.getTile(gx + dx, gy + dy);

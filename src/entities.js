@@ -1,4 +1,4 @@
-import { CONFIG, TILES } from './config.js';
+import { CONFIG, TILES, ID_TO_TILE } from './config.js';
 import Utils from './utils.js';
 import { WakeParticle } from './particles.js'; 
 
@@ -26,10 +26,9 @@ export class Projectile {
         return 'active';
     }
     draw(ctx, camX, camY) {
-        // [NEW] Shadow for Range Projectiles
+        // Shadow for Range Projectiles
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.beginPath();
-        // Draw shadow slightly below the projectile to simulate height
         ctx.arc(this.x - camX, this.y - camY + 12, 4, 0, Math.PI * 2); 
         ctx.fill();
 
@@ -171,74 +170,76 @@ export class Entity {
         }
     }
 
+    // [NEW] "Try-And-Slide" Movement Logic
     move(dx, dy, world) {
-        const half = (CONFIG.TILE_SIZE / 2) - 4; 
-        const check = (tx, ty) => {
-            const gx = Math.floor(tx / CONFIG.TILE_SIZE);
-            const gy = Math.floor(ty / CONFIG.TILE_SIZE);
+        // Reduced hitbox size for better clearance
+        const half = 10; 
+        
+        // Helper: Is this single point valid?
+        const isPointValid = (x, y) => {
+            const gx = Math.floor(x / CONFIG.TILE_SIZE);
+            const gy = Math.floor(y / CONFIG.TILE_SIZE);
             const tileId = world.getTile(gx, gy);
+            
             if (this.inBoat || this.type === 'boat') {
-                if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return true;
-                return false; 
+                // Boats need water
+                return (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id);
             } else {
+                // Land units need LAND and NOT SOLID
                 if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) return false;
                 if (world.isSolid(gx, gy)) return false;
                 return true;
             }
         };
-        const verify = (nx, ny) => {
-            if (!check(nx - half, ny - half)) return false;
-            if (!check(nx + half, ny - half)) return false;
-            if (!check(nx - half, ny + half)) return false;
-            if (!check(nx + half, ny + half)) return false;
-            return true;
-        }
-        
-        let attemptsX = this.x + dx;
-        let attemptsY = this.y + dy;
-        let moved = false;
 
-        // Try moving both axes
-        if (verify(attemptsX, attemptsY)) {
-            this.x = attemptsX;
-            this.y = attemptsY;
+        // Helper: Does the entire hitbox fit at (nx, ny)?
+        const canMoveTo = (nx, ny) => {
+            return isPointValid(nx - half, ny - half) &&
+                   isPointValid(nx + half, ny - half) &&
+                   isPointValid(nx - half, ny + half) &&
+                   isPointValid(nx + half, ny + half);
+        };
+
+        let moved = false;
+        
+        // 1. Try moving diagonally (Desired Move)
+        if (canMoveTo(this.x + dx, this.y + dy)) {
+            this.x += dx;
+            this.y += dy;
             moved = true;
-        } else {
-            // [TODO] Improved Slide Logic to prevent stuck NPCs
-            // Try moving X only
-            if (verify(attemptsX, this.y)) {
-                this.x = attemptsX;
-                this.velocity.y *= 0; // Cancel blocked momentum
-                moved = true;
-            } 
-            // Try moving Y only
-            else if (verify(this.x, attemptsY)) {
-                this.y = attemptsY;
-                this.velocity.x *= 0; // Cancel blocked momentum
-                moved = true;
-            } 
-            else {
-                // Completely blocked
-                this.velocity.x *= -0.5;
-                this.velocity.y *= -0.5;
-                
-                // [FIX] If NPC is blocked, randomize direction briefly to unstuck
-                if (this.type === 'npc' && this.aiState) {
-                    this.aiState.mode = 'rest';
-                    this.aiState.timer = 30; // Pause for half a second
-                }
+        } 
+        // 2. If blocked, try sliding along X (Block Y)
+        else if (Math.abs(dx) > 0.01 && canMoveTo(this.x + dx, this.y)) {
+            this.x += dx;
+            this.velocity.y = 0; // Kill blocked momentum
+            moved = true;
+        } 
+        // 3. If blocked, try sliding along Y (Block X)
+        else if (Math.abs(dy) > 0.01 && canMoveTo(this.x, this.y + dy)) {
+            this.y += dy;
+            this.velocity.x = 0; // Kill blocked momentum
+            moved = true;
+        }
+        else {
+            // Completely stuck
+            // Randomize slight wiggle to unstuck NPCs
+            if (this.type === 'npc' && this.aiState) {
+                this.aiState.mode = 'rest';
+                this.aiState.timer = 15;
             }
         }
 
-        const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
-        const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
-        
-        // Safety push-out if trapped inside solid
-        if (world.isSolid(gx, gy) && !this.inBoat && this.type !== 'boat') {
-             const pushX = dx !== 0 ? Math.sign(dx) : (Math.random()-0.5);
-             const pushY = dy !== 0 ? Math.sign(dy) : (Math.random()-0.5);
-             this.x += pushX * 2;
-             this.y += pushY * 2;
+        // [SAFETY] Emergency Push-Out if spawned inside a wall
+        if (!canMoveTo(this.x, this.y)) {
+             const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
+             const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
+             const tx = gx * CONFIG.TILE_SIZE + 16;
+             const ty = gy * CONFIG.TILE_SIZE + 16;
+             const dirX = this.x - tx;
+             const dirY = this.y - ty;
+             const len = Math.sqrt(dirX*dirX + dirY*dirY) || 1;
+             this.x += (dirX/len) * 2;
+             this.y += (dirY/len) * 2;
         }
 
         if (moved) {
@@ -249,7 +250,8 @@ export class Entity {
             this.isMoving = false;
         }
 
-        const currentTile = world.getTile(gx, gy);
+        // Update Visual Speed (for boat particles etc)
+        const currentTile = world.getTile(Math.floor(this.x / CONFIG.TILE_SIZE), Math.floor(this.y / CONFIG.TILE_SIZE));
         if (this.inBoat) {
             if (currentTile === TILES.DEEP_WATER.id) this.speed = CONFIG.PLAYER_SPEED_DEEP_WATER;
             else this.speed = CONFIG.PLAYER_SPEED_WATER;
