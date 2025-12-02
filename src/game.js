@@ -18,12 +18,18 @@ export default class Game {
         this.peers = {}; 
         this.spawnPoint = {x: 0, y: 0};
         
+        // [NEW] Death tracking
+        this.deathCount = 0;
+        this.respawnTimer = 0;
+        this.isRespawning = false;
+        
         let validSpawn = {x: 0, y: 0};
         
         if (isHost) {
             if (loadData) {
                 this.world.importData(loadData.world);
                 validSpawn = { x: loadData.player.x, y: loadData.player.y };
+                if (loadData.deathCount) this.deathCount = loadData.deathCount; // Load death count
                 console.log("Loaded Saved Game");
             } else {
                 let attempts = 0;
@@ -131,17 +137,35 @@ export default class Game {
         requestAnimationFrame(t => this.loop(t));
     }
 
+    // [NEW] Initiates the death sequence
+    triggerDeath() {
+        if (this.isRespawning) return;
+        
+        this.isRespawning = true;
+        this.deathCount++;
+        
+        // Cooldown grows: 3s + (2s per death)
+        this.respawnTimer = 3000 + (this.deathCount * 2000);
+        
+        this.spawnParticles(this.player.x, this.player.y, '#f00', 30);
+        this.showMessage(`YOU DIED! RESPAWN IN ${Math.ceil(this.respawnTimer/1000)}s`, "#f00");
+    }
+
     respawn() {
-        this.spawnParticles(this.player.x, this.player.y, '#f00', 20);
-        this.spawnText(this.player.x, this.player.y, "RESPAWNED", "#fff");
+        this.isRespawning = false;
+        this.spawnParticles(this.spawnPoint.x, this.spawnPoint.y, '#fff', 20); // White particles at spawn
+        this.spawnText(this.spawnPoint.x, this.spawnPoint.y, "RESPAWNED", "#fff");
+        
         this.player.hp = this.player.maxHp;
         this.player.inBoat = false;
         this.player.x = this.spawnPoint.x;
         this.player.y = this.spawnPoint.y;
+        
         if(this.player.x === 0 && this.player.y === 0) {
              this.player.x = 100;
              this.player.y = 100;
         }
+        
         this.player.velocity = {x:0, y:0};
         this.ui.update();
     }
@@ -157,7 +181,8 @@ export default class Game {
             },
             world: this.world.exportData(),
             boats: this.boats.map(b => ({x: b.x, y: b.y, hp: b.hp, owner: b.owner})),
-            invasion: { timer: this.invasionTimer, next: this.nextInvasionTime }
+            invasion: { timer: this.invasionTimer, next: this.nextInvasionTime },
+            deathCount: this.deathCount // Save death count
         };
         try { localStorage.setItem('pixelWarfareSave', JSON.stringify(data)); this.showMessage("GAME SAVED", "#0f0"); } 
         catch (e) { console.error(e); this.showMessage("SAVE FAILED", "#f00"); }
@@ -736,6 +761,7 @@ export default class Game {
         this.network.update(dt);
         this.world.update(dt);
         
+        // Peer Interpolation
         Object.values(this.peers).forEach(p => {
             const dx = p.targetX - p.x;
             const dy = p.targetY - p.y;
@@ -747,7 +773,6 @@ export default class Game {
                 p.y = p.targetY;
             }
 
-            // [FIXED] Interpolate rotation for peers in boats
             if (p.inBoat && p.boatStats && p.boatStats.targetHeading !== undefined) {
                  p.boatStats.heading = Utils.lerpAngle(p.boatStats.heading, p.boatStats.targetHeading, 0.1);
             }
@@ -755,11 +780,34 @@ export default class Game {
 
         if (this.shootCooldown > 0) this.shootCooldown--;
 
-        this.regenTimer += dt;
-        if (this.regenTimer > 2000 && this.player.hp < 100 && this.player.hp > 0) {
-            this.player.hp = Math.min(100, this.player.hp + 5);
-            this.spawnText(this.player.x, this.player.y - 20, "+5 HP", "#0f0");
-            this.regenTimer = 0;
+        // [MODIFIED] Regen only when not respawning and HP > 0
+        if (!this.isRespawning) {
+            this.regenTimer += dt;
+            if (this.regenTimer > 2000 && this.player.hp < 100 && this.player.hp > 0) {
+                this.player.hp = Math.min(100, this.player.hp + 5);
+                this.spawnText(this.player.x, this.player.y - 20, "+5 HP", "#0f0");
+                this.regenTimer = 0;
+            }
+        }
+
+        // [NEW] Respawn Logic Phase 1: Check Death
+        if (this.player.hp <= 0 && !this.isRespawning) {
+             this.triggerDeath();
+        }
+
+        // [NEW] Respawn Logic Phase 2: Timer
+        if (this.isRespawning) {
+            this.respawnTimer -= dt;
+            const seconds = Math.ceil(this.respawnTimer / 1000);
+            
+            // Periodically refresh the text to create a countdown effect
+            if (Math.floor((this.respawnTimer + dt) / 1000) !== Math.floor(this.respawnTimer / 1000)) {
+                this.showMessage(`RESPAWN IN ${seconds}s`, "#f00");
+            }
+            
+            if (this.respawnTimer <= 0) {
+                this.respawn();
+            }
         }
 
         const inputState = {
@@ -769,25 +817,34 @@ export default class Game {
             right: this.input.keys['d'] || this.input.keys['arrowright']
         };
 
-        if (this.player.inBoat) {
-            if (this.input.keys['q']) this.player.shootBroadside(this, 'left');
-            if (this.input.keys['e']) this.player.shootBroadside(this, 'right');
-            this.player.updateBoatMovement(inputState, dt, this.world, this); 
-            this.player.moveTime += dt;
-        } else {
-            let dx = 0, dy = 0;
-            if(inputState.up) dy = -1;
-            if(inputState.down) dy = 1;
-            if(inputState.left) dx = -1;
-            if(inputState.right) dx = 1;
-            if (dx || dy) {
-                this.player.isMoving = true; 
-                this.player.moveTime += dt;  
-                const len = Math.sqrt(dx*dx + dy*dy);
-                this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
+        // [MODIFIED] Only process movement/actions if alive
+        if (!this.isRespawning) {
+            if (this.player.inBoat) {
+                if (this.input.keys['q']) this.player.shootBroadside(this, 'left');
+                if (this.input.keys['e']) this.player.shootBroadside(this, 'right');
+                this.player.updateBoatMovement(inputState, dt, this.world, this); 
+                this.player.moveTime += dt;
             } else {
-                this.player.isMoving = false;
+                let dx = 0, dy = 0;
+                if(inputState.up) dy = -1;
+                if(inputState.down) dy = 1;
+                if(inputState.left) dx = -1;
+                if(inputState.right) dx = 1;
+                if (dx || dy) {
+                    this.player.isMoving = true; 
+                    this.player.moveTime += dt;  
+                    const len = Math.sqrt(dx*dx + dy*dy);
+                    this.player.move((dx/len)*this.player.speed, (dy/len)*this.player.speed, this.world);
+                } else {
+                    this.player.isMoving = false;
+                }
             }
+            
+            this.handleInteraction();
+            this.updateMeleeCombat(); 
+        } else {
+            // While respawning, ensure player is marked as not moving
+            this.player.isMoving = false;
         }
 
         const viewW = this.canvas.width / this.zoom;
@@ -798,9 +855,6 @@ export default class Game {
         const camDx = (this.camera.x - oldCamX) * this.zoom;
         const camDy = (this.camera.y - oldCamY) * this.zoom;
         this.windParticles.forEach(p => p.update(this.canvas.width, this.canvas.height, this.world.wind.angle, camDx, camDy));
-
-        this.handleInteraction();
-        this.updateMeleeCombat(); 
 
         // [NEW] Interpolation for entities (Client side only)
         if (!this.network.isHost) {
@@ -1021,7 +1075,8 @@ export default class Game {
             return true;
         });
 
-        if (this.player.hp <= 0) this.respawn();
+        // [MODIFIED] Removed simple respawn call, now handled by logic block above
+        // if (this.player.hp <= 0) this.respawn();
 
         this.ui.update(); 
         

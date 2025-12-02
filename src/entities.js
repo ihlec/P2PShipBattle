@@ -160,14 +160,8 @@ export class Entity {
         this.move(this.velocity.x * pixelScale, this.velocity.y * pixelScale, world);
         stats.speed = Math.sqrt(this.velocity.x**2 + this.velocity.y**2) * pixelScale;
         this.isMoving = stats.speed > 0.1;
-        if (game && stats.speed > 0.5 && Math.random() < 0.3) {
-            const sternX = this.x - Math.cos(stats.heading) * 40;
-            const sternY = this.y - Math.sin(stats.heading) * 40;
-            const w1 = new WakeParticle(sternX, sternY, stats.heading + Math.PI + 0.2);
-            const w2 = new WakeParticle(sternX, sternY, stats.heading + Math.PI - 0.2);
-            if (!game.particles) game.particles = [];
-            game.particles.push(w1, w2);
-        }
+        
+        // [MODIFIED] Removed WakeParticle generation here to prevent "exhaust" clouds
     }
 
     // [NEW] "Try-And-Slide" Movement Logic

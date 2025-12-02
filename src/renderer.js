@@ -188,7 +188,7 @@ export default class Renderer {
                         } else {
                             this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                             this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
-                            // [MODIFIED] Removed grey border (strokeRect)
+                            // Removed grey border
                         }
 
                     } else if (obj._type === 'sheep') {
@@ -217,7 +217,6 @@ export default class Renderer {
                             }
                         }
                     } else if (obj._type === 'npc') {
-                         // [TODO] Force Black Color for NPCs
                          this.drawCharacter(obj._orig, false, true); 
                     } else {
                         this.drawCharacter(obj._orig, false); 
@@ -231,7 +230,8 @@ export default class Renderer {
             if(p.draw) p.draw(this.ctx, 0, 0); 
         });
 
-        this.game.particles.forEach(p => p.draw(this.ctx, this.game.camera.x, this.game.camera.y)); 
+        // [FIXED] Pass 0,0 instead of camera coords to avoid double subtraction drift
+        this.game.particles.forEach(p => p.draw(this.ctx, 0, 0)); 
 
         if (this.game.activeBlueprint) {
             const mx = (this.game.input.mouse.x / this.game.zoom) + this.game.camera.x;
@@ -456,12 +456,7 @@ export default class Renderer {
                     this.ctx.moveTo(dx + ts / 2, dy + ts);
                     this.ctx.lineTo(dx + ts / 2, dy - 15);
                     this.ctx.stroke();
-                    if (boatData && boatData.isMoving && Math.random() < 0.3) {
-                        this.ctx.fillStyle = 'rgba(255,255,255,0.5)';
-                        this.ctx.beginPath();
-                        this.ctx.arc(dx + ts / 2, dy - 10, Math.random() * 5 + 2, 0, Math.PI * 2);
-                        this.ctx.fill();
-                    }
+                    // [MODIFIED] Removed white particle clouds from here
                 } else if (type === 41) {
                     this.ctx.fillStyle = TILES.SHIP_RAIL.color;
                     if (c === 0) this.ctx.fillRect(dx, dy, 4, ts);
