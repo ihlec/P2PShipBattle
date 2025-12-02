@@ -192,15 +192,19 @@ export default class Renderer {
                         }
 
                     } else if (obj._type === 'sheep') {
-                        // This calls the method causing the error
                         this.drawSheep(obj._orig); 
                     } else if (obj._type === 'player' || obj._type === 'peer') { 
                         const isPlayer = obj._type === 'player';
                         if (obj._orig.inBoat) {
-                            if(isPlayer) this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, 'player', 100, 100, obj._orig);
+                            // [FIXED] Draw boat for BOTH player and peers.
+                            // We use obj._orig.boatStats.heading if available, otherwise 0.
+                            const heading = (obj._orig.boatStats && obj._orig.boatStats.heading !== undefined) ? obj._orig.boatStats.heading : 0;
+                            
+                            this.drawBoat(obj.x, obj.y, heading, 'player', 100, 100, obj._orig);
+                            
                             this.ctx.save();
                             this.ctx.translate(obj.x, obj.y);
-                            this.ctx.rotate((obj._orig.boatStats ? obj._orig.boatStats.heading : 0) + Math.PI/2); 
+                            this.ctx.rotate(heading + Math.PI/2); 
                             this.ctx.fillStyle = isPlayer ? '#3498db' : '#993333';
                             this.ctx.fillRect(-4, -4, 8, 8); 
                             this.ctx.restore();
@@ -509,7 +513,6 @@ export default class Renderer {
         this.drawHealth({ x, y, hp, maxHp }); 
     }
 
-    // [MISSING FUNCTION RESTORED]
     drawSheep(obj) { 
         const isMoving = obj.moveTimer > 0;
         const tick = isMoving ? (Date.now() * 0.015) : (Date.now() * 0.005);

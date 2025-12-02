@@ -393,10 +393,6 @@ export default class Game {
 
                 if (affordable) {
                     if (this.activeBlueprint.special === 'boat') {
-                        if (!this.network.isHost) {
-                             this.spawnText(mx * this.zoom, my * this.zoom, "HOST ONLY", "#f00");
-                             return;
-                        }
                         const targetId = this.world.getTile(gx, gy);
                         const allowed = [TILES.WATER.id, TILES.DEEP_WATER.id];
                         if (!allowed.includes(targetId)) {
@@ -404,9 +400,20 @@ export default class Game {
                             return;
                         }
                         
-                        this.boats.push(new Boat((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16));
                         for (let [id, qty] of Object.entries(costMap)) consume(id, qty);
-                        this.spawnParticles((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16, '#8B4513', 8);
+
+                        if (this.network.isHost) {
+                            this.boats.push(new Boat((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16));
+                            this.spawnParticles((gx * CONFIG.TILE_SIZE) + 16, (gy * CONFIG.TILE_SIZE) + 16, '#8B4513', 8);
+                        } else {
+                            // [FIXED] Send Spawn Request for Clients
+                            this.network.actions.sendEntReq({ 
+                                act: 'spawnBoat', 
+                                x: (gx * CONFIG.TILE_SIZE) + 16, 
+                                y: (gy * CONFIG.TILE_SIZE) + 16 
+                            });
+                        }
+                        
                         this.ui.update();
                         return; 
                     }
@@ -425,8 +432,10 @@ export default class Game {
                             neighbors.forEach(n => {
                                 const nid = this.world.getTile(n.x, n.y);
                                 if (nid === TILES.WATER.id || nid === TILES.DEEP_WATER.id) {
-                                    if(this.tryBuild(n.x, n.y, TILES.WOOD_RAIL.id)) {
-                                        this.spawnParticles(n.x * CONFIG.TILE_SIZE + 16, n.y * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 4);
+                                    // [MODIFIED] Build Stone Wall (TILES.WALL) instead of rails. 
+                                    // Pass 'true' for isBridge to allow building on water.
+                                    if(this.tryBuild(n.x, n.y, TILES.WALL.id, false, true)) {
+                                        this.spawnParticles(n.x * CONFIG.TILE_SIZE + 16, n.y * CONFIG.TILE_SIZE + 16, TILES.GREY.color, 4);
                                     }
                                 }
                             });
@@ -448,6 +457,7 @@ export default class Game {
             }
         } else if (this.input.mouse.clickedRight) {
             
+            // [FIXED] Boat Interaction Logic
             if (this.player.inBoat) {
                 const clickedTile = this.world.getTile(gx, gy);
                 if (clickedTile === TILES.SAND.id || clickedTile === TILES.GRASS.id || clickedTile === TILES.WOOD_RAIL.id || clickedTile === TILES.GREY.id) {
@@ -459,7 +469,14 @@ export default class Game {
                         this.player.x = (gx * CONFIG.TILE_SIZE) + 16;
                         this.player.y = (gy * CONFIG.TILE_SIZE) + 16;
                         this.player.boatStats.speed = 0;
-                        this.boats.push(new Boat(boatSpawnX, boatSpawnY));
+                        
+                        // [FIX] Network request for exit so host creates the boat entity authoritative
+                        if (this.network.isHost) {
+                            this.boats.push(new Boat(boatSpawnX, boatSpawnY));
+                        } else {
+                            this.network.actions.sendEntReq({ act: 'spawnBoat', x: boatSpawnX, y: boatSpawnY });
+                        }
+
                         this.spawnText(this.player.x, this.player.y, "EXIT BOAT", "#fff");
                         return;
                     }
@@ -467,12 +484,25 @@ export default class Game {
             } else {
                 const clickedBoatIndex = this.boats.findIndex(b => Utils.distance(b, {x:mx, y:my}) < 32);
                 if (clickedBoatIndex !== -1) {
-                    if (Utils.distance(this.player, this.boats[clickedBoatIndex]) < 100) {
+                    const boat = this.boats[clickedBoatIndex];
+                    if (Utils.distance(this.player, boat) < 100) {
                         this.player.inBoat = true;
-                        this.player.x = this.boats[clickedBoatIndex].x;
-                        this.player.y = this.boats[clickedBoatIndex].y;
+                        this.player.x = boat.x;
+                        this.player.y = boat.y;
                         this.player.boatStats.speed = 0;
-                        this.boats.splice(clickedBoatIndex, 1);
+                        
+                        // [FIX] Network request for entering boat
+                        // Host deletes the boat entity from the world.
+                        // Client deletes locally for instant feedback, sync handles the rest.
+                        if (this.network.isHost) {
+                            this.boats.splice(clickedBoatIndex, 1);
+                        } else {
+                            // Tell host we consumed this boat
+                            this.network.actions.sendEntReq({ act: 'enterBoat', id: boat.id });
+                            // Optimistic local update (prevent jitter before sync)
+                            this.boats.splice(clickedBoatIndex, 1);
+                        }
+
                         this.spawnText(this.player.x, this.player.y, "ENTER BOAT", "#fff");
                         return;
                     }
@@ -621,6 +651,13 @@ export default class Game {
             return true;
         }
 
+        // [NEW] Allow overwriting Stone Walls when expanding a bridge
+        if (isBridge && current === TILES.WALL.id) {
+            this.world.setTile(gx, gy, id);
+            if(this.network.isHost && !force) this.network.broadcastBuild(gx, gy, id);
+            return true;
+        }
+
         if (ID_TO_TILE[current].solid && current !== TILES.WATER.id && current !== TILES.DEEP_WATER.id) return false;
         
         this.world.setTile(gx, gy, id);
@@ -698,6 +735,11 @@ export default class Game {
             if (Math.abs(dx) > 100 || Math.abs(dy) > 100) {
                 p.x = p.targetX;
                 p.y = p.targetY;
+            }
+
+            // [FIXED] Interpolate rotation for peers in boats
+            if (p.inBoat && p.boatStats && p.boatStats.targetHeading !== undefined) {
+                 p.boatStats.heading = Utils.lerpAngle(p.boatStats.heading, p.boatStats.targetHeading, 0.1);
             }
         });
 

@@ -10,7 +10,16 @@ export default class Network {
         this.playerName = playerName;
         this.lastEntSync = 0;
         
-        const config = { appId: 'pixel-warfare-v2' };
+        // [FIXED] Explicitly list reliable WebRTC trackers to avoid connection failures
+        const config = { 
+            appId: 'pixel-warfare-v2',
+            trackerUrls: [
+                'wss://tracker.openwebtorrent.com',
+                'wss://tracker.btorrent.xyz',
+                'wss://tracker.webtorrent.dev',
+                'wss://tracker.files.fm:7073/announce' // Keeping original but prioritizing others
+            ]
+        };
         this.room = joinRoom(config, roomId);
 
         // --- ACTIONS ---
@@ -89,6 +98,13 @@ export default class Network {
                 p.hp = data.hp; p.isMoving = data.mv;
                 if(data.mv) p.moveTime += 16; 
                 if (p.x === 0 && p.y === 0) { p.x = data.x; p.y = data.y; }
+                
+                // [FIX] Boat rotation interpolation for peers
+                if (data.bh !== undefined && p.boatStats) {
+                    p.boatStats.targetHeading = data.bh;
+                } else if (data.bh !== undefined) {
+                    p.boatStats = { heading: data.bh, targetHeading: data.bh };
+                }
             } else {
                 this.game.peers[peerId] = { 
                     id: peerId, type: 'peer', name: "Player",
@@ -97,6 +113,9 @@ export default class Network {
                     activeMelee: data.w, inBoat: data.b,
                     isMoving: data.mv, moveTime: 0, direction: {x:0, y:1}
                 };
+                if (data.bh !== undefined) {
+                    this.game.peers[peerId].boatStats = { heading: data.bh, targetHeading: data.bh };
+                }
             }
         });
 
@@ -138,7 +157,7 @@ export default class Network {
             if (!this.isHost) {
                 this.syncList(this.game.npcs, data.n, 'npc');
                 this.syncList(this.game.animals, data.a, 'sheep');
-                this.syncList(this.game.boats, data.b, 'boat');
+                this.syncList(this.game.boats, data.b, 'boat'); // This will now correctly remove the boat if the host removed it
                 this.syncList(this.game.loot, data.l, 'loot'); 
                 
                 if (data.c) {
@@ -180,13 +199,18 @@ export default class Network {
                     if (cannon) {
                         cannon.ammo += 5;
                         this.game.spawnParticles(cannon.x, cannon.y, '#00ffff', 5);
-                    } else {
-                        this.game.recalcCannons();
-                        const retry = this.game.cannons.find(c => c.key === data.id);
-                        if(retry) {
-                            retry.ammo += 5;
-                            this.game.spawnParticles(retry.x, retry.y, '#00ffff', 5);
-                        }
+                    }
+                } else if (data.act === 'spawnBoat') {
+                    // Triggered when client BUILDS or EXITS a boat
+                    this.game.boats.push(new Boat(data.x, data.y));
+                    this.game.spawnParticles(data.x, data.y, '#8B4513', 8);
+                } else if (data.act === 'enterBoat') {
+                    // [NEW] Triggered when client ENTERS a boat
+                    // Host removes the boat entity so it stops syncing to others
+                    const idx = this.game.boats.findIndex(b => b.id === data.id);
+                    if (idx !== -1) {
+                        this.game.boats.splice(idx, 1);
+                        // Optional: Could send a confirmation, but syncList handles cleanup on next tick
                     }
                 }
             }
@@ -220,7 +244,6 @@ export default class Network {
                 
                 if (!isLoot) {
                     entity.id = d.i;
-                    // [NEW] Set initial targets to avoid interpolation jump
                     entity.targetX = d.x;
                     entity.targetY = d.y;
                 }
@@ -229,11 +252,10 @@ export default class Network {
             
             if (isLoot) return; 
 
-            // [NEW] Update Targets instead of Position
+            // Update Targets
             entity.targetX = d.x;
             entity.targetY = d.y;
             
-            // Snap if distance is too great
             if (Math.abs(d.x - entity.x) > 100 || Math.abs(d.y - entity.y) > 100) {
                 entity.x = d.x;
                 entity.y = d.y;
@@ -246,7 +268,6 @@ export default class Network {
                 entity.hasWool = d.w;
                 entity.isMoving = (Math.abs(entity.targetX - entity.x) > 1 || Math.abs(entity.targetY - entity.y) > 1);
             } else if (type === 'boat') {
-                // [NEW] Update Heading Target
                 if (d.bs) entity.boatStats.targetHeading = d.bs.h;
                 if (d.o) entity.owner = d.o; 
             } else if (type === 'npc') {
@@ -254,6 +275,7 @@ export default class Network {
             }
         });
 
+        // [FIXED] Aggressive cleanup: If the server didn't send it, DELETE IT.
         for (let i = localList.length - 1; i >= 0; i--) {
             const currentId = (type === 'loot') ? localList[i].uid : localList[i].id;
             if (currentId && !incomingIds.has(currentId)) {
@@ -270,7 +292,8 @@ export default class Network {
                 w: this.game.player.activeMelee,
                 b: this.game.player.inBoat,
                 hp: Math.floor(this.game.player.hp),
-                mv: this.game.player.isMoving
+                mv: this.game.player.isMoving,
+                bh: this.game.player.inBoat ? Number(this.game.player.boatStats.heading.toFixed(2)) : 0
             });
         }
 
@@ -279,9 +302,9 @@ export default class Network {
              if (now - this.lastEntSync > 50) { 
                  this.lastEntSync = now;
                  
-                 const n = this.game.npcs.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp }));
-                 const a = this.game.animals.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
-                 const b = this.game.boats.map(e => ({ i: e.id, x: Math.round(e.x), y: Math.round(e.y), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
+                 const n = this.game.npcs.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp }));
+                 const a = this.game.animals.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
+                 const b = this.game.boats.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
                  const l = this.game.loot.map(e => ({ i: e.uid, x: Math.round(e.x), y: Math.round(e.y), t: e.id, q: e.qty }));
                  
                  const c = this.game.cannons.map(t => ({ k: t.key, a: t.ammo }));
