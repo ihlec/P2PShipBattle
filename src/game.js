@@ -1136,40 +1136,41 @@ export default class Game {
 
     tryHostAttack(npc, target) {
         const dist = Math.sqrt((target.x - npc.x)**2 + (target.y - npc.y)**2);
-        if (dist < 40) { // Attack Range
-            // Damage Buffer Logic for Entities
-            if (!npc.damageBuffer) npc.damageBuffer = 0;
-            npc.damageBuffer += 0.5; // Attack speed
+        
+        // [FIXED] Stricter hit registration (13px instead of 40px)
+        // [FIXED] Attack Cooldown logic
+        if (!npc.attackCooldown) npc.attackCooldown = 0;
+        if (npc.attackCooldown > 0) npc.attackCooldown--;
 
-            if (npc.damageBuffer >= 1) {
-                npc.damageBuffer = 0;
-                const dmg = 5; // Base Damage
+        if (dist < 13 && npc.attackCooldown <= 0) { 
+            npc.attackCooldown = 60; // 1 Second Delay
+            
+            const dmg = 5; // Base Damage
 
-                if (target.type === 'entity') {
-                    const ent = target.obj;
-                    if (ent.hp > 0) {
-                        if (ent === this.player) {
-                             if(!this.godMode) this.player.hp -= dmg;
-                        } else if (ent.type === 'peer') {
-                             this.network.sendHit(ent.id, dmg);
-                        } else {
-                             // Boat or Animal
-                             ent.hp -= dmg;
-                        }
-                        this.spawnParticles(ent.x, ent.y, '#f00', 2);
+            if (target.type === 'entity') {
+                const ent = target.obj;
+                if (ent.hp > 0) {
+                    if (ent === this.player) {
+                         if(!this.godMode) this.player.hp -= dmg;
+                    } else if (ent.type === 'peer') {
+                         this.network.sendHit(ent.id, dmg);
+                    } else {
+                         // Boat or Animal
+                         ent.hp -= dmg;
                     }
-                } else if (target.type === 'tile') {
-                    // Attack Building
-                    const totalDmg = this.world.hitTile(target.gx, target.gy, dmg * 5); // Bonus dmg to walls
-                    this.spawnParticles(target.x, target.y, '#777', 3);
-                    
-                    // Check Destruction
-                    const def = ID_TO_TILE[target.id];
-                    if (def && def.hp && totalDmg >= def.hp) {
-                         this.network.requestRemove(target.gx, target.gy, TILES.GRASS.id);
-                         this.spawnParticles(target.x, target.y, '#555', 10);
-                         this.recalcCannons();
-                    }
+                    this.spawnParticles(ent.x, ent.y, '#f00', 2);
+                }
+            } else if (target.type === 'tile') {
+                // Attack Building
+                const totalDmg = this.world.hitTile(target.gx, target.gy, dmg * 5); // Bonus dmg to walls
+                this.spawnParticles(target.x, target.y, '#777', 3);
+                
+                // Check Destruction
+                const def = ID_TO_TILE[target.id];
+                if (def && def.hp && totalDmg >= def.hp) {
+                     this.network.requestRemove(target.gx, target.gy, TILES.GRASS.id);
+                     this.spawnParticles(target.x, target.y, '#555', 10);
+                     this.recalcCannons();
                 }
             }
         }
