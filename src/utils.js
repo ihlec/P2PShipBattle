@@ -12,72 +12,75 @@ export default class Utils {
         return (s >>> 0) / 4294967296; 
     }
     
-    static hsl(h, s, l, x, y, seed, hVar, lVar) {
+    static hsl(hue, saturation, lightness, x, y, seed, hueVariance, lightVariance) {
         const r1 = Utils.noise(x, y, seed); 
         const r2 = Utils.noise(x, y, seed + 100); 
-        const newH = h + (r1 * hVar * 2) - hVar;
-        const newL = l + (r2 * lVar * 2) - lVar;
-        return `hsl(${newH}, ${s}%, ${newL}%)`;
+        const newHue = hue + (r1 * hueVariance * 2) - hueVariance;
+        const newLight = lightness + (r2 * lightVariance * 2) - lightVariance;
+        return `hsl(${newHue}, ${saturation}%, ${newLight}%)`;
     }
 
-    static lerp(a, b, t) { return a + t * (b - a); }
+    static lerp(start, end, amount) { 
+        return start + amount * (end - start); 
+    }
     
-    // [NEW] Handles angular interpolation (0 to 360 wrap around)
-    static lerpAngle(a, b, t) {
-        let diff = b - a;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        return a + diff * t;
+    static lerpAngle(start, end, amount) {
+        let difference = end - start;
+        while (difference > Math.PI) difference -= Math.PI * 2;
+        while (difference < -Math.PI) difference += Math.PI * 2;
+        return start + difference * amount;
     }
 
-    static smoothstep(t) { return t * t * (3 - 2 * t); }
+    static smoothstep(t) { 
+        return t * t * (3 - 2 * t); 
+    }
 
     static valueNoise2D(x, y, seed) {
-        const iX = Math.floor(x);
-        const iY = Math.floor(y);
-        const fX = x - iX;
-        const fY = y - iY;
+        const integerX = Math.floor(x);
+        const integerY = Math.floor(y);
+        const fractionalX = x - integerX;
+        const fractionalY = y - integerY;
         
-        const sX = Utils.smoothstep(fX);
-        const sY = Utils.smoothstep(fY);
+        const smoothX = Utils.smoothstep(fractionalX);
+        const smoothY = Utils.smoothstep(fractionalY);
         
-        const n00 = Utils.noise(iX, iY, seed);
-        const n10 = Utils.noise(iX + 1, iY, seed);
-        const n01 = Utils.noise(iX, iY + 1, seed);
-        const n11 = Utils.noise(iX + 1, iY + 1, seed);
+        const n00 = Utils.noise(integerX, integerY, seed);
+        const n10 = Utils.noise(integerX + 1, integerY, seed);
+        const n01 = Utils.noise(integerX, integerY + 1, seed);
+        const n11 = Utils.noise(integerX + 1, integerY + 1, seed);
         
-        const ix0 = Utils.lerp(n00, n10, sX);
-        const ix1 = Utils.lerp(n01, n11, sX);
+        const interpX0 = Utils.lerp(n00, n10, smoothX);
+        const interpX1 = Utils.lerp(n01, n11, smoothX);
         
-        return Utils.lerp(ix0, ix1, sY);
+        return Utils.lerp(interpX0, interpX1, smoothY);
     }
     
     static getElevation(x, y, seed) {
-        let amp = 1;
-        let freq = 0.01; 
+        let amplitude = 1;
+        let frequency = 0.01; 
         let total = 0;
-        let maxAmp = 0;
+        let maxAmplitude = 0;
         
         for(let i = 0; i < 4; i++) {
-            total += Utils.valueNoise2D(x * freq, y * freq, seed) * amp;
-            maxAmp += amp;
-            amp *= 0.5;
-            freq *= 2;
+            total += Utils.valueNoise2D(x * frequency, y * frequency, seed) * amplitude;
+            maxAmplitude += amplitude;
+            amplitude *= 0.5;
+            frequency *= 2;
         }
-        return (total / maxAmp) * 2 - 1; 
+        return (total / maxAmplitude) * 2 - 1; 
     }
 
     static getBiome(x, y, seed) {
-        const n = Utils.getElevation(x, y, seed);
+        const elevation = Utils.getElevation(x, y, seed);
         
-        if (n < -0.2) return TILES.DEEP_WATER.id;
-        if (n < 0.25) return TILES.WATER.id; 
-        if (n < 0.3) return TILES.SAND.id; 
-        if (n > 0.6) return TILES.MOUNTAIN.id;
+        if (elevation < -0.2) return TILES.DEEP_WATER.id;
+        if (elevation < 0.25) return TILES.WATER.id; 
+        if (elevation < 0.3) return TILES.SAND.id; 
+        if (elevation > 0.6) return TILES.MOUNTAIN.id;
         
-        if (n > 0.45) {
-            const tNoise = Utils.noise(x, y, seed + 999);
-            if (tNoise < 0.6) {
+        if (elevation > 0.45) {
+            const treeNoise = Utils.noise(x, y, seed + 999);
+            if (treeNoise < 0.6) {
                 const rockChance = Utils.noise(x, y, seed + 444);
                 if (rockChance < 0.02) return TILES.STONE_BLOCK.id;
                 return TILES.TREE.id;
@@ -85,8 +88,8 @@ export default class Utils {
             return TILES.GRASS.id; 
         }
         
-        const scattered = Utils.noise(x, y, seed + 888);
-        if (scattered < 0.05) {
+        const scatteredNoise = Utils.noise(x, y, seed + 888);
+        if (scatteredNoise < 0.05) {
              const rockChance = Utils.noise(x, y, seed + 555);
              if (rockChance < 0.1) return TILES.STONE_BLOCK.id;
              return TILES.TREE.id;
@@ -98,5 +101,7 @@ export default class Utils {
         return TILES.GRASS.id;
     }
     
-    static distance(e1, e2) { return Math.sqrt((e1.x - e2.x)**2 + (e1.y - e2.y)**2); }
+    static distance(entity1, entity2) { 
+        return Math.sqrt((entity1.x - entity2.x)**2 + (entity1.y - entity2.y)**2); 
+    }
 }

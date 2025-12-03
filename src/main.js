@@ -1,4 +1,4 @@
-import Game from './game.js';
+import Game from './core/Game.js';
 
 window.onload = () => {
     const hostBtn = document.getElementById('btn-host');
@@ -11,40 +11,41 @@ window.onload = () => {
     // Default Name
     nameInput.value = "Player" + Math.floor(Math.random()*100);
 
-    const getRoomId = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+    const generateRoomId = () => Math.random().toString(36).substring(2, 6).toUpperCase();
 
     if (hostBtn) {
-        // 1. HOST NEW
+        // Host New Game
         hostBtn.onclick = () => {
-            const roomId = getRoomId();
-            const name = nameInput.value || "Host";
+            const roomId = generateRoomId();
+            const playerName = nameInput.value || "Host";
             menu.style.display = 'none';
-            window.game = new Game(roomId, true, name, null); // Null = No save data
+            // Null indicates no save data to load
+            window.game = new Game(roomId, true, playerName, null); 
             alert(`Room Created! Share Code: ${roomId}`);
         };
 
-        // 2. HOST LOAD
+        // Load Saved Game
         loadHostBtn.onclick = () => {
-            const json = localStorage.getItem('pixelWarfareSave');
-            if (!json) return alert("No Save Found!");
+            const saveString = localStorage.getItem('pixelWarfareSave');
+            if (!saveString) return alert("No Save Found!");
             
-            const roomId = getRoomId();
-            const name = nameInput.value || "Host";
-            const saveData = JSON.parse(json);
+            const roomId = generateRoomId();
+            const playerName = nameInput.value || "Host";
+            const saveData = JSON.parse(saveString);
             
             menu.style.display = 'none';
-            window.game = new Game(roomId, true, name, saveData);
+            window.game = new Game(roomId, true, playerName, saveData);
             alert(`Game Loaded! Share Code: ${roomId}`);
         };
 
-        // 3. JOIN
+        // Join Game
         joinBtn.onclick = () => {
             const roomId = roomInput.value.toUpperCase();
-            const name = nameInput.value || "Guest";
+            const playerName = nameInput.value || "Guest";
             if (roomId.length < 2) return alert("Invalid Room ID");
             
             menu.style.display = 'none';
-            window.game = new Game(roomId, false, name, null);
+            window.game = new Game(roomId, false, playerName, null);
         };
     }
 };

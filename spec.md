@@ -29,7 +29,7 @@ Based on the comprehensive analysis of the provided source code, here is the det
 * **Equipment:** Active Slot for Melee (Hand/Sword) and Ranged (Stone/Spear).
 
 #### 2.3 Combat System
-* **Melee:** Uses "Hand" (1 dmg), Wood Sword (50 dmg), or Iron Sword (90 dmg). Hit detection is distance-based.
+* **Melee:** Uses "Hand" (1 dmg), Wood Sword (50 dmg), or Iron Sword (90 dmg). Hits regiter on intersection of the players center.
 * **Ranged:**
     * **Throwing:** Players can throw Stones (25 dmg), Wood Spears (35 dmg), or Iron Spears (60 dmg).
     * **Projectiles:** Have travel speed, range, and owner properties (Player vs. Enemy).

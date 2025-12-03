@@ -1,5 +1,5 @@
-import { CONFIG, TILES, ID_TO_TILE, SHIP_LAYOUT } from './config.js';
-import Utils from './utils.js';
+import { CONFIG, TILES, ID_TO_TILE, SHIP_LAYOUT } from '../config.js';
+import Utils from '../utils.js';
 
 export default class Renderer {
     constructor(game, canvas) {
@@ -21,6 +21,7 @@ export default class Renderer {
     }
 
     draw() {
+        // 1. Clear Screen
         this.ctx.fillStyle = '#1a1a1a';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
@@ -28,11 +29,13 @@ export default class Renderer {
         this.ctx.scale(this.game.zoom, this.game.zoom);
         this.ctx.translate(-this.game.camera.x, -this.game.camera.y);
 
+        // 2. Culling Bounds
         const startCol = Math.floor(this.game.camera.x / CONFIG.TILE_SIZE);
         const endCol = startCol + (this.canvas.width / this.game.zoom / CONFIG.TILE_SIZE) + 1;
         const startRow = Math.floor(this.game.camera.y / CONFIG.TILE_SIZE);
         const endRow = startRow + (this.canvas.height / this.game.zoom / CONFIG.TILE_SIZE) + 1;
 
+        // 3. Bucket Sort for Z-Indexing
         const rowBuckets = {};
         const addToBucket = (obj, type) => {
             const r = Math.floor(obj.y / CONFIG.TILE_SIZE);
@@ -45,25 +48,23 @@ export default class Renderer {
         this.game.boats.forEach(n => addToBucket(n, 'boat')); 
         addToBucket(this.game.player, 'player');
         this.game.loot.forEach(l => addToBucket(l, 'loot'));
-        
-        // Add Peers
-        Object.values(this.game.peers).forEach(p => {
-            addToBucket(p, 'peer');
-        });
+        Object.values(this.game.peers).forEach(p => addToBucket(p, 'peer'));
 
-        // --- PASS 1: GROUND ---
+        // --- PASS 1: GROUND LAYER ---
         for (let r = startRow - 2; r <= endRow; r++) {
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.game.world.getTile(c, r);
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
 
+                // Draw Water/Ground (skipping trees/walls which are drawn later)
                 if ((!tile.solid || tile.isWater) && id !== TILES.TREE.id && id !== TILES.WOOD_WALL_OPEN.id && id !== TILES.TORCH.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                     
+                    // Detail Noise
                     if (id === TILES.GRASS.id || id === TILES.SAND.id) {
                         const noise = Utils.noise(c, r, this.game.world.seed);
                         if (noise > 0.7) {
@@ -74,7 +75,8 @@ export default class Renderer {
                     }
                 }
                 
-                if (id === TILES.WOOD_WALL_OPEN.id) {
+                // Ground under Fences (Open or Closed) AND Torches - Shows biome underneath
+                if (id === TILES.WOOD_WALL_OPEN.id || id === TILES.WOOD_WALL.id || id === TILES.TORCH.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
                      const biome = Utils.getBiome(c, r, this.game.world.seed);
@@ -83,7 +85,8 @@ export default class Renderer {
                      this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
 
-                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id || id === TILES.TORCH.id) {
+                // Ground under Trees/Mountains
+                if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
                      this.ctx.fillStyle = TILES.GRASS.color; 
@@ -92,7 +95,7 @@ export default class Renderer {
             }
         }
 
-        // --- PASS 2: OBJECTS & BUILDINGS ---
+        // --- PASS 2: OBJECTS & ENTITIES ---
         for (let r = startRow - 2; r <= endRow; r++) { 
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.game.world.getTile(c, r);
@@ -102,7 +105,23 @@ export default class Renderer {
                 const tx = c * CONFIG.TILE_SIZE;
                 const ty = r * CONFIG.TILE_SIZE;
 
-                if (id === TILES.GREY.id) this.ctx.fillStyle = tile.color;
+                // Static Structures
+                if (id === TILES.GREY.id) {
+                    // Check if this is a bridge (over water)
+                    const biome = Utils.getBiome(c, r, this.game.world.seed);
+                    const isOverWater = (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id);
+                    
+                    this.ctx.fillStyle = tile.color;
+                    this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                    if (isOverWater) {
+                        this.drawBridgeWalls(tx, ty, c, r);
+                    }
+                }
+                else if (id === TILES.ROAD.id) {
+                    // Road Segment (Blueprint) - Detailed Paving
+                    this.drawRoad(tx, ty, c, r);
+                }
                 else if (id === TILES.WALL.id) this.drawStoneWall(tx, ty, tile.color, c, r);
                 else if (id === TILES.WOOD_WALL.id || id === TILES.WOOD_WALL_OPEN.id) this.drawWoodFence(tx, ty, c, r, id === TILES.WOOD_WALL_OPEN.id);
                 else if (id === TILES.WOOD_RAIL.id) {
@@ -133,19 +152,20 @@ export default class Renderer {
                     this.ctx.arc(tx + 16, ty + 8, 4 + flicker, 0, Math.PI*2);
                     this.ctx.fill();
                 }
-                else if (tile.solid && !tile.isWater && id !== TILES.MOUNTAIN.id && id !== TILES.STONE_BLOCK.id && !tile.isTower && id !== TILES.WALL.id && id !== TILES.WOOD_WALL.id && id !== TILES.WOOD_RAIL.id && id !== TILES.GREY.id) {
+                else if (tile.solid && !tile.isWater && !tile.isTower && id !== TILES.WALL.id && id !== TILES.WOOD_WALL.id && id !== TILES.WOOD_RAIL.id && id !== TILES.GREY.id) {
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    // Generic bevel
                     this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
                     this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
                     this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
-                    this.ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                    this.ctx.strokeRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
 
+                // Tile Health Bars
                 if (tile.hp) {
-                    const dmg = this.game.world.getTileDamage(c, r);
-                    if (dmg > 0) {
+                    const tileKey = `${c},${r}`;
+                    const tileData = this.game.world.tileData[tileKey];
+                    if (tileData && tileData.dmg > 0) {
                         const max = tile.hp;
                         const w = 24; const h = 4;
                         const bx = tx + 4; const by = ty - 12;
@@ -154,16 +174,17 @@ export default class Renderer {
                         this.ctx.fillStyle = '#f00';
                         this.ctx.fillRect(bx, by, w, h);
                         this.ctx.fillStyle = '#0f0';
-                        this.ctx.fillRect(bx, by, w * ((max - dmg) / max), h);
+                        this.ctx.fillRect(bx, by, w * ((max - tileData.dmg) / max), h);
                     }
                 }
             }
 
-            // --- ENTITIES ---
+            // Entities
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'boat') {
-                        this.drawBoat(obj.x, obj.y, obj._orig.boatStats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
+                        const stats = obj._orig.boatStats || { heading: 0 };
+                        this.drawBoat(obj.x, obj.y, stats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
                     } else if (obj._type === 'loot') {
                         const gx = Math.floor(obj.x / CONFIG.TILE_SIZE);
                         const gy = Math.floor(obj.y / CONFIG.TILE_SIZE);
@@ -186,9 +207,19 @@ export default class Renderer {
                             this.ctx.stroke();
                             this.ctx.restore();
                         } else {
-                            this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
-                            this.ctx.fillRect(obj.x - 6, obj.y - 6 + bob, 12, 12);
-                            // Removed grey border
+                            if (ID_TO_TILE[obj.id]) {
+                                const lx = obj.x - 6;
+                                const ly = obj.y - 6 + bob;
+                                const lw = 12;
+                                
+                                this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
+                                this.ctx.fillRect(lx, ly, lw, lw);
+                                
+                                // Draw Border around land loot
+                                this.ctx.strokeStyle = '#000';
+                                this.ctx.lineWidth = 1;
+                                this.ctx.strokeRect(lx, ly, lw, lw);
+                            }
                         }
 
                     } else if (obj._type === 'sheep') {
@@ -225,14 +256,16 @@ export default class Renderer {
             }
         }
 
+        // Projectiles
         this.ctx.fillStyle = '#fff';
         this.game.projectiles.forEach(p => {
             if(p.draw) p.draw(this.ctx, 0, 0); 
         });
 
-        // [FIXED] Pass 0,0 instead of camera coords to avoid double subtraction drift
-        this.game.particles.forEach(p => p.draw(this.ctx, 0, 0)); 
+        // Particles
+        this.game.particles.draw(this.ctx); 
 
+        // Blueprints Ghost
         if (this.game.activeBlueprint) {
             const mx = (this.game.input.mouse.x / this.game.zoom) + this.game.camera.x;
             const my = (this.game.input.mouse.y / this.game.zoom) + this.game.camera.y;
@@ -255,20 +288,105 @@ export default class Renderer {
         
         this.ctx.restore(); 
 
+        // Lighting
         this.renderLighting();
 
-        this.game.windParticles.forEach(p => p.draw(this.ctx, this.game.world.wind.angle));
+        // Wind Particles
+        if (this.game.particles.windParticles) {
+            this.game.particles.windParticles.forEach(p => p.draw(this.ctx, this.game.world.wind.angle));
+        }
 
+        // Floating Text
         this.ctx.font = "bold 14px monospace";
         this.ctx.textAlign = 'left';
         this.ctx.save();
         this.ctx.scale(this.game.zoom, this.game.zoom);
         this.ctx.translate(-this.game.camera.x, -this.game.camera.y);
-        this.game.texts.forEach(t => {
-            this.ctx.fillStyle = t.col;
-            this.ctx.fillText(t.txt, t.x, t.y);
-        });
+        
+        if (this.game.particles.texts) {
+            this.game.particles.texts.forEach(t => {
+                this.ctx.fillStyle = t.col;
+                this.ctx.fillText(t.txt, t.x, t.y);
+            });
+        }
         this.ctx.restore();
+    }
+
+    // --- HELPER DRAW FUNCTIONS ---
+
+    drawBridgeWalls(tx, ty, c, r) {
+        const ts = CONFIG.TILE_SIZE;
+        const world = this.game.world;
+        
+        // Helper to check if a tile is water/deep water
+        const isWater = (id) => id === TILES.WATER.id || id === TILES.DEEP_WATER.id;
+        
+        // Check neighbors
+        const n = world.getTile(c, r - 1);
+        const s = world.getTile(c, r + 1);
+        const w = world.getTile(c - 1, r);
+        const e = world.getTile(c + 1, r);
+
+        // Wood Colors
+        const woodDark = '#5C3317';
+        const woodLight = '#8B4513';
+
+        const drawRail = (x, y, w, h, isVertical) => {
+            this.ctx.fillStyle = woodDark;
+            this.ctx.fillRect(x, y, w, h);
+            
+            this.ctx.fillStyle = woodLight;
+            if (isVertical) {
+                this.ctx.fillRect(x + 1, y, w - 2, h);
+            } else {
+                this.ctx.fillRect(x, y + 1, w, h - 2);
+            }
+        };
+
+        // If neighbor is water, draw a small wall on that side
+        if (isWater(n)) drawRail(tx, ty, ts, 4, false);
+        if (isWater(s)) drawRail(tx, ty + ts - 4, ts, 4, false);
+        if (isWater(w)) drawRail(tx, ty, 4, ts, true);
+        if (isWater(e)) drawRail(tx + ts - 4, ty, 4, ts, true);
+        
+        // Corner posts for polish
+        this.ctx.fillStyle = '#3E2723';
+        if (isWater(n) || isWater(w)) this.ctx.fillRect(tx, ty, 4, 4);
+        if (isWater(n) || isWater(e)) this.ctx.fillRect(tx + ts - 4, ty, 4, 4);
+        if (isWater(s) || isWater(w)) this.ctx.fillRect(tx, ty + ts - 4, 4, 4);
+        if (isWater(s) || isWater(e)) this.ctx.fillRect(tx + ts - 4, ty + ts - 4, 4, 4);
+    }
+
+    drawRoad(tx, ty, c, r) {
+        // Paving Stone Look (4x4 Grid of stones per tile)
+        const ts = CONFIG.TILE_SIZE;
+        const gridSize = 4;
+        const stoneSize = ts / gridSize; // 8px per stone
+
+        // Base/Grout
+        this.ctx.fillStyle = '#4a4a4a'; // Dark grey grout
+        this.ctx.fillRect(tx, ty, ts, ts);
+
+        for (let y = 0; y < gridSize; y++) {
+            for (let x = 0; x < gridSize; x++) {
+                const sx = tx + x * stoneSize + 1; // +1 for grout spacing
+                const sy = ty + y * stoneSize + 1;
+                const sw = stoneSize - 2; // -2 to leave grout
+                const sh = stoneSize - 2;
+
+                // Slight color variation based on position
+                const noise = Utils.noise(c * 4 + x, r * 4 + y, this.game.world.seed);
+                const shade = 100 + Math.floor(noise * 40); // 100-140 brightness
+                
+                this.ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+                this.ctx.fillRect(sx, sy, sw, sh);
+                
+                // Highlight (Bevel effect)
+                this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                this.ctx.fillRect(sx, sy, sw, 1);
+                this.ctx.fillRect(sx, sy, 1, sh);
+            }
+        }
     }
 
     drawStoneWall(tx, ty, color, c, r) { 
@@ -276,7 +394,6 @@ export default class Renderer {
         this.ctx.fillStyle = '#444';
         this.ctx.fillRect(tx, ty, ts, ts);
         this.ctx.fillStyle = color;
-        const seed = c * 1000 + r;
         this.ctx.fillRect(tx + 2, ty + 2, 12, 8);
         this.ctx.fillRect(tx + 16, ty + 2, 14, 8);
         this.ctx.fillRect(tx + 2, ty + 12, 8, 8);
@@ -289,8 +406,7 @@ export default class Renderer {
 
     drawWoodFence(tx, ty, c, r, isOpen) { 
         const ts = CONFIG.TILE_SIZE;
-        this.ctx.fillStyle = TILES.GRASS.color;
-        this.ctx.fillRect(tx, ty, ts, ts);
+        // Background removed here to let biome show through from Pass 1
         this.ctx.fillStyle = '#5C3317';
         if (isOpen) {
             this.ctx.fillRect(tx, ty, 6, ts);
@@ -327,6 +443,8 @@ export default class Renderer {
         this.ctx.fillRect(tx + ts - 4, topY + ts - 4, 6, 6);
         this.ctx.strokeStyle = 'rgba(0,0,0,0.3)';
         this.ctx.strokeRect(tx - 2, topY, ts + 4, ts);
+        
+        // Cannon ammo display
         const cannon = this.game.cannons.find(can => can.key === `${c},${r}`);
         if (cannon) {
             this.ctx.fillStyle = cannon.ammo > 0 ? '#0ff' : '#f00';
@@ -371,15 +489,18 @@ export default class Renderer {
 
     drawTree(tx, ty, c, r, rowBuckets) { 
         let isOccluding = false;
-        for (let checkR = r - 2; checkR < r; checkR++) {
-            if (rowBuckets[checkR] && rowBuckets[checkR].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) isOccluding = true;
+        // Check if entity is behind tree
+        if (rowBuckets && rowBuckets[r] && rowBuckets[r].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) {
+            isOccluding = true;
         }
+        
         this.ctx.globalAlpha = isOccluding ? 0.4 : 1.0;
         this.ctx.fillStyle = '#3E2723';
         this.ctx.fillRect(tx + 12, ty - 8, 8, 24);
         const leafColor = Utils.hsl(120, 50, 30, c, r, this.game.world.seed, 10, 5);
         this.ctx.fillStyle = leafColor;
         const shapeR = Utils.noise(c, r, this.game.world.seed + 555);
+        
         if (shapeR < 0.33) {
             this.ctx.fillRect(tx, ty - 24, 32, 24);
             this.ctx.fillStyle = 'rgba(0, 60, 0, 0.3)';
@@ -412,115 +533,173 @@ export default class Renderer {
         this.ctx.save();
         this.ctx.translate(x, y);
         this.ctx.rotate(heading + Math.PI / 2);
-        const rows = SHIP_LAYOUT.length;
-        const cols = SHIP_LAYOUT[0].length;
+        
+        const rows = SHIP_LAYOUT.length; // 6
+        const cols = SHIP_LAYOUT[0].length; // 3
         const ts = 16;
-        const startX = -(cols * ts) / 2;
-        const startY = -(rows * ts) / 2;
-        this.ctx.fillStyle = '#3E2723';
+        const width = cols * ts;
+        const height = rows * ts;
+        const startX = -width / 2;
+        const startY = -height / 2;
+
+        // 1. Realistic Hull Shape (Symmetrical)
+        this.ctx.fillStyle = '#3E2723'; // Dark Wood Hull
         this.ctx.beginPath();
+        
+        // Symmetrical curve logic
+        // Bow Point
         this.ctx.moveTo(0, startY);
-        this.ctx.lineTo(startX + cols * ts, startY + ts);
-        this.ctx.lineTo(startX + cols * ts, startY + rows * ts);
-        this.ctx.lineTo(startX, startY + rows * ts);
-        this.ctx.lineTo(startX, startY + ts);
+        
+        // Right Side Curve
+        this.ctx.quadraticCurveTo(width / 2 + 4, startY + height / 3, width / 2, startY + height - 8);
+        this.ctx.quadraticCurveTo(width / 2, startY + height, 0, startY + height);
+        
+        // Left Side Curve (Mirrored)
+        this.ctx.quadraticCurveTo(-width / 2, startY + height, -width / 2, startY + height - 8);
+        this.ctx.quadraticCurveTo(-width / 2 - 4, startY + height / 3, 0, startY);
+        
         this.ctx.closePath();
         this.ctx.fill();
-        let mastX = 0;
-        let mastY = 0;
-        let hasMast = false;
+        this.ctx.stroke(); 
+
+        // Inner Deck (lighter wood)
+        this.ctx.fillStyle = '#5D4037';
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, startY + 6);
+        this.ctx.quadraticCurveTo(width / 2 - 2, startY + height / 3, width / 2 - 4, startY + height - 10);
+        this.ctx.quadraticCurveTo(width / 2 - 4, startY + height - 4, 0, startY + height - 4);
+        this.ctx.quadraticCurveTo(-width / 2 + 4, startY + height - 4, -width / 2 + 4, startY + height - 10);
+        this.ctx.quadraticCurveTo(-width / 2 + 2, startY + height / 3, 0, startY + 6);
+        this.ctx.fill();
+
+        let mastX = 0, mastY = 0, hasMast = false;
+        
+        // Render Layout Items
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
                 const type = SHIP_LAYOUT[r][c];
                 const dx = startX + c * ts;
                 const dy = startY + r * ts;
-                if (type !== 0 && type !== 44) {
-                    this.ctx.fillStyle = TILES.SHIP_DECK.color;
-                    this.ctx.fillRect(dx, dy, ts, ts);
-                    this.ctx.fillStyle = 'rgba(0,0,0,0.1)';
-                    this.ctx.fillRect(dx, dy + 4, ts, 1);
-                    this.ctx.fillRect(dx, dy + 8, ts, 1);
-                    this.ctx.fillRect(dx, dy + 12, ts, 1);
+                
+                // Deck Planking details
+                if (type === 40 || type === 43 || type === 42) { // Deck, Cannon, Mast have deck under
+                     this.ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                     // Vertical plank lines
+                     this.ctx.fillRect(dx, dy, 1, ts); 
+                     this.ctx.fillRect(dx + ts/2, dy, 1, ts);
+                     // Nail holes
+                     this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                     this.ctx.fillRect(dx + 2, dy + 2, 1, 1);
+                     this.ctx.fillRect(dx + ts - 2, dy + ts - 2, 1, 1);
                 }
-                if (type === 44) {
-                    this.ctx.fillStyle = TILES.SHIP_DECK.color;
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(dx + ts / 2, dy);
-                    this.ctx.lineTo(dx + ts, dy + ts);
-                    this.ctx.lineTo(dx, dy + ts);
-                    this.ctx.closePath();
-                    this.ctx.fill();
-                    this.ctx.strokeStyle = '#5C3317';
-                    this.ctx.lineWidth = 2;
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(dx + ts / 2, dy + ts);
-                    this.ctx.lineTo(dx + ts / 2, dy - 15);
-                    this.ctx.stroke();
-                    // [MODIFIED] Removed white particle clouds from here
-                } else if (type === 41) {
-                    this.ctx.fillStyle = TILES.SHIP_RAIL.color;
-                    if (c === 0) this.ctx.fillRect(dx, dy, 4, ts);
-                    if (c === 2) this.ctx.fillRect(dx + ts - 4, dy, 4, ts);
-                } else if (type === 45) {
-                    this.ctx.fillStyle = '#4E342E';
-                    this.ctx.fillRect(dx, dy, ts, ts);
-                    if (r === rows - 1) {
-                        this.ctx.fillStyle = '#FFD700';
-                        this.ctx.fillRect(dx + 4, dy + ts - 4, ts - 8, 2);
-                    }
-                } else if (type === 42) {
-                    this.ctx.fillStyle = TILES.SHIP_MAST.color;
-                    this.ctx.beginPath();
-                    this.ctx.arc(dx + ts / 2, dy + ts / 2, 5, 0, Math.PI * 2);
-                    this.ctx.fill();
+
+                if (type === 44) { // Bow Sprit
+                     this.ctx.fillStyle = '#5C3317';
+                     this.ctx.beginPath();
+                     this.ctx.moveTo(dx + ts/2, dy + ts);
+                     this.ctx.lineTo(dx + ts/2, dy - 8); // Stick out
+                     this.ctx.strokeStyle = '#3E2723';
+                     this.ctx.lineWidth = 2;
+                     this.ctx.stroke();
+                } else if (type === 42) { // Mast
                     mastX = dx + ts / 2;
                     mastY = dy + ts / 2;
                     hasMast = true;
-                } else if (type === 43) {
-                    this.ctx.fillStyle = '#000';
-                    this.ctx.beginPath();
-                    this.ctx.arc(dx + ts / 2, dy + ts / 2, 4, 0, Math.PI * 2);
-                    this.ctx.fill();
-                    if (c === 0) this.ctx.fillRect(dx - 2, dy + ts / 2 - 2, 8, 4);
-                    else this.ctx.fillRect(dx + 8, dy + ts / 2 - 2, 8, 4);
                 }
             }
         }
+
+        // Draw 3 Cannons on each side (Manually positioned for better look)
+        // Adjusted spacing to be tighter: 1.5 -> 1.8, 4.5 -> 4.2 (Center remains 3.0)
+        const cannonYPositions = [startY + ts * 1.8, startY + ts * 3, startY + ts * 4.2];
+        
+        this.ctx.fillStyle = '#111'; // Cannon Barrel
+        const drawCannon = (cx, cy, side) => { // side: -1 left, 1 right
+            this.ctx.save();
+            this.ctx.translate(cx, cy);
+            if (side === -1) this.ctx.rotate(-Math.PI/2);
+            else this.ctx.rotate(Math.PI/2);
+            
+            // Mount
+            this.ctx.fillStyle = '#3E2723';
+            this.ctx.fillRect(-3, -3, 6, 6);
+            
+            // Barrel
+            this.ctx.fillStyle = '#111';
+            this.ctx.beginPath();
+            this.ctx.moveTo(-2, -2);
+            this.ctx.lineTo(2, -2);
+            this.ctx.lineTo(3, 8); // Flared end
+            this.ctx.lineTo(-3, 8);
+            this.ctx.closePath();
+            this.ctx.fill();
+            this.ctx.restore();
+        };
+
+        cannonYPositions.forEach(cy => {
+            drawCannon(startX + 4, cy, -1); // Left
+            drawCannon(startX + width - 4, cy, 1); // Right
+        });
+
+        // Draw Mast and Sail
         if (hasMast) {
             this.ctx.save();
             this.ctx.translate(mastX, mastY);
+            
+            // Calculate Wind Interaction
             let windAngle = this.game.world.wind.angle;
-            let diff = windAngle - heading;
-            diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-            let sailRot = Math.max(-1.0, Math.min(1.0, diff));
-            this.ctx.rotate(sailRot);
-            this.ctx.fillStyle = '#5D4037';
-            this.ctx.fillRect(-32, -2, 64, 4);
-            this.ctx.fillStyle = owner === 'enemy' ? '#111' : '#eee';
+            let boatAngle = heading + Math.PI/2;
+            let relWind = windAngle - boatAngle;
+            
+            // Normalize angle
+            while (relWind <= -Math.PI) relWind += Math.PI*2;
+            while (relWind > Math.PI) relWind -= Math.PI*2;
+
+            // Sail Rotation (attempt to catch wind, clamped)
+            let sailAngle = relWind * 0.8; 
+            // Clamp sail so it doesn't spin wildly through the mast, usually sails swing +/- 90 degrees
+            sailAngle = Math.max(-Math.PI/2, Math.min(Math.PI/2, sailAngle));
+
+            this.ctx.rotate(sailAngle);
+            
+            // Boom
+            this.ctx.fillStyle = '#5D4037'; 
+            this.ctx.fillRect(-24, -2, 48, 4);
+            
+            // Sail (Curved)
+            const fullness = 10 + Math.sin(Date.now() / 200) * 2; // Breathing effect
+            this.ctx.fillStyle = owner === 'enemy' ? '#222' : '#eee'; 
             this.ctx.beginPath();
-            this.ctx.moveTo(-30, 0);
-            this.ctx.quadraticCurveTo(0, -25, 30, 0);
-            this.ctx.lineTo(30, 2);
-            this.ctx.quadraticCurveTo(0, -23, -30, 2);
+            this.ctx.moveTo(-22, 0);
+            this.ctx.quadraticCurveTo(0, -fullness - 20, 22, 0); // Billow out
+            this.ctx.lineTo(22, 2);
+            this.ctx.quadraticCurveTo(0, -fullness - 18, -22, 2);
             this.ctx.fill();
+            
+            // Mast Circle (Top)
+            this.ctx.fillStyle = '#3E2723';
+            this.ctx.beginPath();
+            this.ctx.arc(0, 0, 4, 0, Math.PI * 2);
+            this.ctx.fill();
+
             this.ctx.restore();
         }
+        
         this.ctx.restore();
         this.drawHealth({ x, y, hp, maxHp }); 
     }
 
     drawSheep(obj) { 
-        const isMoving = obj.moveTimer > 0;
-        const tick = isMoving ? (Date.now() * 0.015) : (Date.now() * 0.005);
+        const isMoving = obj.moveTimer > 0 || (obj.isMoving);
+        const tick = Date.now() * 0.015;
         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 2 : 0;
-        const breathe = !isMoving ? Math.sin(tick) * 0.5 : 0;
         
         this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
         this.ctx.beginPath();
         this.ctx.ellipse(obj.x, obj.y + 6, 8, 3, 0, 0, Math.PI * 2);
         this.ctx.fill();
 
-        const bodyY = obj.y - 10 - bounceY - breathe;
+        const bodyY = obj.y - 10 - bounceY;
 
         const legOffset1 = isMoving ? Math.sin(tick)*3 : 0;
         const legOffset2 = isMoving ? Math.sin(tick+Math.PI)*3 : 0;
@@ -538,13 +717,10 @@ export default class Renderer {
     }
 
     drawCharacter(obj, isPlayer, isEnemy = false) { 
-        // [TODO] Black color for NPC land units
         let colorShirt, colorPants, colorSkin;
 
         if (isEnemy) {
-            colorShirt = '#000000';
-            colorPants = '#111111';
-            colorSkin = '#222222';
+            colorShirt = '#000000'; colorPants = '#111111'; colorSkin = '#222222';
         } else {
             colorShirt = isPlayer ? '#3498db' : '#993333';
             colorPants = isPlayer ? '#8B4513' : '#654321';
@@ -552,41 +728,47 @@ export default class Renderer {
         }
 
         const colorHelmet = isEnemy ? '#333' : '#8B6F43';
-        const colorBoots = '#333333';
         const isMoving = obj.isMoving;
         const tick = isMoving ? (obj.moveTime * 0.015) : (Date.now() * 0.005);
         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
-        const stride = 4;
-        const leg1Offset = isMoving ? Math.sin(tick) * stride : 0;
-        const leg2Offset = isMoving ? Math.sin(tick + Math.PI) * stride : 0;
-        const armSwing = 5;
-        const arm1Offset = isMoving ? Math.sin(tick + Math.PI) * armSwing : 0;
-        const arm2Offset = isMoving ? Math.sin(tick) * armSwing : 0;
-        const BODY_W = 16;
-        const BODY_X = obj.x - BODY_W / 2;
+        
         this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
         this.ctx.beginPath();
         this.ctx.ellipse(obj.x, obj.y + 12, 6, 3, 0, 0, Math.PI * 2);
         this.ctx.fill();
-        this.ctx.fillStyle = colorBoots;
+
+        const BODY_W = 16;
+        const BODY_X = obj.x - BODY_W / 2;
+        const torsoY = obj.y - 8 - bounceY;
+
+        const stride = 4;
+        const leg1Offset = isMoving ? Math.sin(tick) * stride : 0;
+        const leg2Offset = isMoving ? Math.sin(tick + Math.PI) * stride : 0;
+        this.ctx.fillStyle = '#333'; 
         this.ctx.fillRect(BODY_X + 2, obj.y + 10 + leg1Offset, 4, 4);
         this.ctx.fillRect(BODY_X + BODY_W - 6, obj.y + 10 + leg2Offset, 4, 4);
-        const torsoY = obj.y - 8 - bounceY;
+        
         this.ctx.fillStyle = colorPants;
         this.ctx.fillRect(BODY_X, obj.y + 4 - bounceY, BODY_W, 6);
         this.ctx.fillStyle = colorShirt;
         this.ctx.fillRect(BODY_X, torsoY, BODY_W, 15);
+        
+        const armSwing = 5;
+        const arm1Offset = isMoving ? Math.sin(tick + Math.PI) * armSwing : 0;
+        const arm2Offset = isMoving ? Math.sin(tick) * armSwing : 0;
         this.ctx.fillStyle = colorSkin;
         this.ctx.fillRect(obj.x - 12, torsoY + 4 + arm1Offset, 4, 4);
         this.ctx.fillRect(obj.x + 8, torsoY + 4 + arm2Offset, 4, 4);
+        
         const HEAD_SIZE = 12;
         const HEAD_Y = torsoY - 14;
         this.ctx.fillStyle = colorSkin;
         this.ctx.fillRect(obj.x - HEAD_SIZE / 2, HEAD_Y, HEAD_SIZE, HEAD_SIZE);
         this.ctx.fillStyle = colorHelmet;
         this.ctx.fillRect(obj.x - (HEAD_SIZE / 2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6);
+        
         const heldId = obj.activeMelee;
-        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id) && (isPlayer || isEnemy)) {
+        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id)) {
             this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317';
             this.ctx.lineWidth = 3;
             const handX = obj.x + 10;
@@ -596,47 +778,54 @@ export default class Renderer {
             this.ctx.lineTo(handX + 10, handY - 10);
             this.ctx.stroke();
         }
+
         const dir = obj.direction || { x: 0, y: 1 };
         let eyeX1 = obj.x - 5;
         let eyeX2 = obj.x + 2;
         if (dir.x > 0) { eyeX1 += 2; eyeX2 += 2; }
         if (dir.x < 0) { eyeX1 -= 2; eyeX2 -= 2; }
-        if (dir.y >= 0) {
-            this.ctx.fillStyle = isEnemy ? '#ff0000' : '#000000'; // Red eyes for enemies
+        
+        if (dir.y >= -0.1) {
+            this.ctx.fillStyle = isEnemy ? '#ff0000' : '#000000';
             this.ctx.fillRect(eyeX1, HEAD_Y + 4, 3, 3);
             this.ctx.fillRect(eyeX2, HEAD_Y + 4, 3, 3);
         }
+        
         this.drawHealth(obj); 
     }
 
     renderLighting() { 
         const ambient = this.game.world.getAmbientLight();
         if (ambient <= 0.05) return;
+        
         this.shadowCtx.clearRect(0, 0, this.shadowCanvas.width, this.shadowCanvas.height);
         this.shadowCtx.globalCompositeOperation = 'source-over';
         this.shadowCtx.fillStyle = `rgba(0, 0, 0, ${ambient})`;
         this.shadowCtx.fillRect(0, 0, this.shadowCanvas.width, this.shadowCanvas.height);
         this.shadowCtx.globalCompositeOperation = 'destination-out';
+        
         const toScreen = (wx, wy) => ({ x: (wx - this.game.camera.x) * this.game.zoom, y: (wy - this.game.camera.y) * this.game.zoom });
+        
         const drawLight = (wx, wy, radius) => {
             const pos = toScreen(wx, wy);
             if (pos.x < -radius || pos.y < -radius || pos.x > this.canvas.width + radius || pos.y > this.canvas.height + radius) return;
             const grad = this.shadowCtx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, radius * this.game.zoom);
             grad.addColorStop(0, "rgba(255, 255, 255, 1)");
-            grad.addColorStop(0.5, "rgba(255, 255, 255, 0.8)");
             grad.addColorStop(1, "rgba(255, 255, 255, 0)");
             this.shadowCtx.fillStyle = grad;
             this.shadowCtx.beginPath();
             this.shadowCtx.arc(pos.x, pos.y, radius * this.game.zoom, 0, Math.PI * 2);
             this.shadowCtx.fill();
         };
+
         drawLight(this.game.player.x, this.game.player.y, 150);
         this.game.boats.forEach(b => drawLight(b.x, b.y, 120));
-        this.game.projectiles.forEach(p => { if (p.type === 'cannonball') drawLight(p.x, p.y, 40); });
+        
         const startCol = Math.floor(this.game.camera.x / CONFIG.TILE_SIZE);
         const endCol = startCol + (this.canvas.width / this.game.zoom / CONFIG.TILE_SIZE) + 1;
         const startRow = Math.floor(this.game.camera.y / CONFIG.TILE_SIZE);
         const endRow = startRow + (this.canvas.height / this.game.zoom / CONFIG.TILE_SIZE) + 1;
+        
         for (let r = startRow; r <= endRow; r++) {
             for (let c = startCol; c <= endCol; c++) {
                 const id = this.game.world.getTile(c, r);
@@ -646,6 +835,7 @@ export default class Renderer {
                 }
             }
         }
+        
         this.ctx.save();
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.drawImage(this.shadowCanvas, 0, 0);

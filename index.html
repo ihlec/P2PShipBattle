@@ -3,23 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pixel Warfare Multiplayer</title>
+    <title>Pixel Warfare</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-
     <div id="main-menu" style="position:absolute; top:0; left:0; z-index:9999; width:100%; height:100%; background:#111; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#eee; font-family:monospace;">
         <h1 style="color:#ffd700; text-shadow:2px 2px #000; font-size: 40px; margin-bottom: 20px;">PIXEL WARFARE</h1>
-        
         <div style="background:#222; padding:30px; border:2px solid #555; text-align:center; border-radius: 8px; box-shadow: 0 0 20px #000; width: 350px;">
             <input id="name-input" type="text" placeholder="ENTER PLAYER NAME" maxlength="10" style="padding:10px; font-size:16px; text-align:center; background:#000; color:#0f0; border:1px solid #555; width: 100%; box-sizing: border-box; margin-bottom: 20px;">
-            
             <h3 style="margin-top:0; border-bottom:1px solid #444; padding-bottom:10px;">HOST GAME</h3>
             <div style="display:flex; gap:10px;">
                 <button id="btn-host" class="ui-btn" style="flex:1; font-size:14px; padding:10px;">NEW WORLD</button>
                 <button id="btn-load-host" class="ui-btn" style="flex:1; font-size:14px; padding:10px; color:#ffd700;">LOAD</button>
             </div>
-
             <h3 style="margin-top:20px; border-bottom:1px solid #444; padding-bottom:10px;">JOIN GAME</h3>
             <input id="room-input" type="text" placeholder="ENTER ROOM CODE" style="padding:10px; font-size:16px; text-transform:uppercase; text-align:center; background:#000; color:#fff; border:1px solid #555; width: 100%; box-sizing: border-box;">
             <button id="btn-join" class="ui-btn" style="font-size:18px; padding:15px 30px; margin:10px 0 0 0; display:block; width:100%;">JOIN</button>
@@ -44,12 +40,11 @@
             </div>
             <div style="margin-top:5px; padding-top:5px; border-top:1px solid #555;">
                 <button id="btn-save" class="ui-btn">SAVE</button>
-                </div>
+            </div>
         </div>
     </div>
 
     <div id="messages"></div>
-    
     <div id="action-bar">
         <button id="hammer-btn" title="Structures">🔨</button>
         <button id="weapon-btn" title="Weapons">⚔️</button>
@@ -57,7 +52,6 @@
 
     <div id="blueprint-menu" class="floating-menu"></div>
     <div id="weapon-menu" class="floating-menu"></div>
-    
     <div id="inventory-bar"></div>
     <div id="weapon-bar"></div>
     

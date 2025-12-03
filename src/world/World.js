@@ -1,5 +1,5 @@
-import Utils from './utils.js';
-import { ID_TO_TILE, CONFIG } from './config.js';
+import Utils from '../utils.js';
+import { ID_TO_TILE, CONFIG } from '../config.js';
 
 export default class World {
     constructor(seed) {
@@ -17,13 +17,20 @@ export default class World {
         // 0.0 = Noon, 0.25 = Sunset, 0.5 = Midnight, 0.75 = Sunrise
         this.time = 0;
     }
+
     getKey(x, y) { return `${x},${y}`; }
-    getTile(x, y) { return this.modifiedTiles[this.getKey(x, y)] !== undefined ? this.modifiedTiles[this.getKey(x, y)] : Utils.getBiome(x, y, this.seed); }
+    
+    getTile(x, y) { 
+        const key = this.getKey(x, y);
+        return this.modifiedTiles[key] !== undefined ? this.modifiedTiles[key] : Utils.getBiome(x, y, this.seed); 
+    }
+    
     setTile(x, y, id) { 
         const key = this.getKey(x, y);
         this.modifiedTiles[key] = id;
         if (this.tileData[key]) delete this.tileData[key]; 
     }
+    
     isSolid(x, y) { return ID_TO_TILE[this.getTile(x, y)].solid; }
 
     hitTile(x, y, dmg) {
@@ -32,6 +39,7 @@ export default class World {
         this.tileData[key].dmg += dmg;
         return this.tileData[key].dmg;
     }
+
     getTileDamage(x, y) {
         const key = this.getKey(x, y);
         return this.tileData[key] ? this.tileData[key].dmg : 0;

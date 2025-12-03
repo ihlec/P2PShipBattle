@@ -62,7 +62,7 @@ export const TILES = {
     DEEP_WATER: { id: 18, color: '#1a1a6e', solid: true, name: 'Deep Ocean', short: 'D.H2O', isWater: true },
     GRASS: { id: 1, color: '#2d6e32', solid: false, name: 'Grass', short: 'Grs' },
     SAND:  { id: 2, color: '#c2b280', solid: false, name: 'Sand', short: 'Snd' },
-    GREY:  { id: 3, color: '#777777', solid: false, name: 'Stone/Road', short: 'Stn' },
+    GREY:  { id: 3, color: '#777777', solid: false, name: 'Stone', short: 'Stn' }, 
     BLACK: { id: 4, color: '#111111', solid: false, name: 'Obsidian', short: 'Obs' }, 
     IRON:  { id: 5, color: '#444444', solid: false, name: 'Iron', short: 'Irn' }, 
     GOLD:  { id: 7, color: '#ffd700', solid: false, name: 'Gold', short: 'Gld' },
@@ -82,7 +82,7 @@ export const TILES = {
 
     WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral', hp: 30 },
 
-    TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre' },
+    TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre', hp: 40 }, // HP Added: Half of Boulder (80)
     MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt', hp: 200 },
     GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' },
     
@@ -91,6 +91,8 @@ export const TILES = {
     CRATE: { id: 26, color: '#CD853F', solid: false, name: 'Crate', short: 'Box' },
     
     TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10, light: 200 },
+    
+    ROAD: { id: 27, color: '#777777', solid: false, name: 'Paved Road', short: 'Rd.' },
 
     SPEAR_WOOD: { id: 30, color: '#5C3317', solid: false, name: 'Wd.Spear', short: 'W.Spr' },
     SPEAR_IRON: { id: 31, color: '#aaa', solid: false, name: 'Ir.Spear', short: 'I.Spr' },
@@ -124,7 +126,7 @@ export const BLUEPRINTS = [
     { name: "Stone Wall", structure: [{x:0, y:0, id: TILES.WALL.id}], cost: { [TILES.GREY.id]: 2 } },
     { name: "Fence/Gate", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
     { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
-    { name: "Road Segment", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1 } },
+    { name: "Road Segment", structure: [{x:0, y:0, id: TILES.ROAD.id}], cost: { [TILES.GREY.id]: 1 } },
     { name: "Boat", structure: [{x:0, y:0, id: TILES.BOAT.id}], cost: { [TILES.WOOD.id]: 5, [TILES.WOOL.id]: 2 }, special: 'boat' },
     { name: "Torch", structure: [{x:0, y:0, id: TILES.TORCH.id}], cost: { [TILES.WOOD.id]: 1, [TILES.BLACK.id]: 1 } }
 ];
