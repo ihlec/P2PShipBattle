@@ -47,6 +47,7 @@ export class Entity {
         this.activeRange = TILES.GREY.id;
         this.activeMelee = 'hand';
         this.ramCooldown = 0;
+        this.stunTimer = 0; // [NEW] Stun timer for collisions
     }
 
     handleInput(inputHandler, deltaTime, world, game) {
@@ -101,6 +102,13 @@ export class Entity {
         // Cooldowns
         if (stats.cooldownLeft > 0) stats.cooldownLeft--;
         if (stats.cooldownRight > 0) stats.cooldownRight--;
+        
+        // [NEW] Stun Logic
+        if (this.stunTimer > 0) {
+            this.stunTimer--;
+            input.up = false; // Disable acceleration
+            input.down = false;
+        }
 
         // Rudder
         if (input.left) stats.rudder -= config.RUDDER_SPEED;
@@ -165,8 +173,7 @@ export class Entity {
         stats.speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.y ** 2) * PIXEL_SCALE;
         this.isMoving = stats.speed > 0.1;
 
-        // [NEW] Check for collisions with other entities (Ramming)
-        if (game && stats.speed > 1.0) { // Only ram if moving at decent speed
+        if (game && stats.speed > 1.0) { 
             this.checkEntityRam(game);
         }
     }
@@ -250,45 +257,39 @@ export class Entity {
              this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN;
              this.velocity.x *= -0.5; // Bounce
              this.velocity.y *= -0.5;
+             this.stunTimer = 20; // [NEW] Stun
              game.spawnParticles(this.x, this.y, '#fff', 5);
         }
     }
 
-    // [NEW] Logic to ram NPCs/Boats
     checkEntityRam(game) {
         if (this.ramCooldown > 0) return;
 
-        // Gather all potential targets
         const targets = [...game.npcs, ...game.animals, ...game.boats, ...Object.values(game.peers)];
         const RAM_RADIUS = 25;
 
         for (const t of targets) {
-            // Don't hit yourself, or the player if you ARE the player
             if (t === this) continue;
             if (this.inBoat && t === game.player) continue;
 
             const dist = Utils.distance(this, t);
             
             if (dist < RAM_RADIUS) {
-                // Determine damage based on config
                 let damage = 20; 
                 if (t.type === 'boat' || t.inBoat) damage = CONFIG.NPC_RAM.DAMAGE_BOAT; 
-                else damage = 40; // High damage to fleshy targets
+                else damage = 40; 
 
-                // Apply Damage
                 game.applyDamageToEntity(t, damage);
 
-                // Effects & Physics
-                this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN; // Global cooldown
-                
-                // Bounce back
+                this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN; 
                 this.velocity.x *= -0.5;
                 this.velocity.y *= -0.5;
+                this.stunTimer = 20; // [NEW] Stun
                 
                 game.spawnParticles(t.x, t.y, '#f00', 8);
                 game.spawnText(t.x, t.y, "RAM!", "#ff0000");
 
-                return; // Hit one target per frame max
+                return; 
             }
         }
     }

@@ -19,13 +19,15 @@ export default class InputHandler {
             this.keys[e.key.toLowerCase()] = true;
             
             if(e.key.toLowerCase() === 'escape') {
-                // [FIX] Correctly cancel blueprint
+                // [FIX] Correctly cancel blueprint and hide ALL menus
                 this.game.activeBlueprint = null;
                 this.game.player.selectedTile = null;
                 this.game.ui.update();
 
                 const bpMenu = document.getElementById('blueprint-menu');
+                const wpMenu = document.getElementById('weapon-menu');
                 if (bpMenu) bpMenu.style.display = 'none';
+                if (wpMenu) wpMenu.style.display = 'none';
             }
             
             if(e.key.toLowerCase() === 'b') this.game.ui.toggleBlueprints(); 

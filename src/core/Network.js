@@ -13,7 +13,7 @@ export default class Network {
         this.isHost = isHost;
         this.playerName = playerName;
         this.lastEntitySyncTime = 0;
-        this.hostId = null; // [NEW] Track who the host is
+        this.hostId = null; 
         
         const config = { 
             appId: 'pixel-warfare-v2',
@@ -23,6 +23,8 @@ export default class Network {
             ]
         };
         this.room = joinRoom(config, roomId);
+        
+        this.selfId = this.room.selfId;
 
         // Actions
         const [sendInit, getInit] = this.room.makeAction('init');
@@ -64,10 +66,8 @@ export default class Network {
             console.log(`Peer left: ${peerId}`);
             delete this.game.peers[peerId];
 
-            // [NEW] Check if the leaving peer was the Host
             if (!this.isHost && peerId === this.hostId) {
                 this.game.showMessage("CONNECTION LOST", "#f00");
-                // Optional: Stop game loop or disable controls here if desired
             }
         });
 
@@ -90,13 +90,12 @@ export default class Network {
         getWorld((data, peerId) => {
             if (!this.isHost) {
                 console.log("Received World Data");
-                
-                // [NEW] Record the Host ID
                 this.hostId = peerId;
 
                 this.game.world.importData({
                     seed: data.seed,
                     modifiedTiles: data.modified,
+                    tileData: data.tileData, // [NEW] Import Damage Data
                     time: data.time
                 });
                 
@@ -157,6 +156,10 @@ export default class Network {
                 this.syncList(data.a, this.game.animals, 'sheep');
                 this.syncList(data.b, this.game.boats, 'boat');
                 this.syncLoot(data.l);
+                
+                if (data.t !== undefined) {
+                    this.game.world.time = data.t;
+                }
             }
         });
 
@@ -168,18 +171,15 @@ export default class Network {
                     const id = data.id;
                     const current = this.game.world.getTile(gx, gy);
 
-                    // 1. Check if overwriting valid base terrain
                     const baseTerrains = [TILES.GRASS.id, TILES.SAND.id, TILES.WATER.id, TILES.DEEP_WATER.id];
                     if (!baseTerrains.includes(current) && current !== id) return;
 
-                    // 2. Water Logic
                     const isWater = (current === TILES.WATER.id || current === TILES.DEEP_WATER.id);
                     if (isWater) {
                         const allowedOnWater = [TILES.GREY.id, TILES.WOOD_RAIL.id];
                         if (!allowedOnWater.includes(id)) return;
                     }
                     
-                    // 3. Occupancy Check (Validation on Host)
                     if (ID_TO_TILE[id].solid && this.game.isTileOccupied(gx, gy)) return;
 
                     this.game.world.setTile(gx, gy, id);
@@ -245,6 +245,8 @@ export default class Network {
         });
 
         getShoot((data, peerId) => {
+            if (peerId === this.selfId) return;
+
             const p = new Projectile(data.x, data.y, data.tx, data.ty, data.dmg, data.spd, data.col, false, data.type, peerId);
             p.life = data.life;
             this.game.projectiles.push(p);
@@ -275,6 +277,7 @@ export default class Network {
         const payload = {
             seed: this.game.world.seed,
             modified: this.game.world.modifiedTiles,
+            tileData: this.game.world.tileData, // [NEW] Send Damage Data
             time: this.game.world.time,
             spawnX: Math.floor(this.game.spawnPoint.x),
             spawnY: Math.floor(this.game.spawnPoint.y)
@@ -349,7 +352,7 @@ export default class Network {
                  const b = this.game.boats.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
                  const l = this.game.loot.map(e => ({ i: e.uid, x: Math.floor(e.x), y: Math.floor(e.y), t: e.id, q: e.qty }));
                  
-                 this.actions.sendEntities({ n, a, b, l });
+                 this.actions.sendEntities({ n, a, b, l, t: Number(this.game.world.time.toFixed(4)) });
              }
         }
     }
