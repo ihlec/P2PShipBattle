@@ -24,12 +24,9 @@
 
 
 ## TODO
-- grey out the player prendering when died (ghost)
-- spawn boats 100 tiles away
-- if boats dont have a target, let them patrol gradually torwards the player
+- grey out the player rendering when died (ghost)
 - when host player is killed on water, boats get stuck
 - npc boats should avoid ramming each other. 
-- raider drop rate
 
 
 

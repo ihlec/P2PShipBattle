@@ -144,7 +144,7 @@ export default class Game {
             }
         }
 
-        // 3. Absolute Last Resort (Water Spawn - Should ideally never happen)
+        // 3. Absolute Last Resort
         return { x: 16, y: 16 };
     }
 
@@ -340,7 +340,7 @@ export default class Game {
                         }
                     }
                 } else {
-                    this.game.spawnText(mx, my, "TOO EXPENSIVE", "#f00");
+                    this.spawnText(mx, my, "TOO EXPENSIVE", "#f00");
                 }
             }
 
@@ -500,6 +500,14 @@ export default class Game {
         
         if (type === 'sheep') { 
             dropId = TILES.WOOL.id; qty = 2; 
+        } else if (type === 'raider') {
+            // [NEW] Raider Drops: 70% Stone, 15% Obsidian, 10% Iron, 5% Gold
+            const r = Math.random();
+            if (r < 0.70) dropId = TILES.GREY.id;
+            else if (r < 0.85) dropId = TILES.BLACK.id;
+            else if (r < 0.95) dropId = TILES.IRON.id;
+            else dropId = TILES.GOLD.id;
+            qty = 1;
         } else if (type === 'tree' || type === TILES.TREE.id) {
             if (Math.random() < 0.2) {
                 dropId = TILES.GREENS.id; 
@@ -842,7 +850,14 @@ export default class Game {
     
     cleanupEntities() {
          if (this.network.isHost) {
+            // [NEW] Raider Loot Drop Logic
+            const deadNpcs = this.npcs.filter(n => n.hp <= 0);
+            deadNpcs.forEach(n => {
+                this.spawnLoot(n.x, n.y, 'raider'); 
+                this.spawnParticles(n.x, n.y, '#555', 8);
+            });
             this.npcs = this.npcs.filter(n => n.hp > 0);
+
             this.boats = this.boats.filter(b => b.hp > 0);
             
             const deadAnimals = this.animals.filter(a => a.hp <= 0);
