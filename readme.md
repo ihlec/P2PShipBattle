@@ -1,4 +1,4 @@
-# Pixel Warfare ⚔️
+# P2P Ship Battle ⚔️
 
 A multiplayer top-down sandbox survival game built with vanilla JavaScript and HTML5 Canvas. Features procedural world generation, base building, and naval combat using P2P networking.
 
