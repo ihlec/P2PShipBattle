@@ -18,6 +18,7 @@ window.onload = () => {
         hostBtn.onclick = () => {
             const roomId = generateRoomId();
             const playerName = nameInput.value || "Host";
+            nameInput.blur(); // [FIX] Remove focus so WASD works
             menu.style.display = 'none';
             // Null indicates no save data to load
             window.game = new Game(roomId, true, playerName, null); 
@@ -31,6 +32,7 @@ window.onload = () => {
             
             const roomId = generateRoomId();
             const playerName = nameInput.value || "Host";
+            nameInput.blur(); // [FIX] Remove focus so WASD works
             const saveData = JSON.parse(saveString);
             
             menu.style.display = 'none';
@@ -44,6 +46,8 @@ window.onload = () => {
             const playerName = nameInput.value || "Guest";
             if (roomId.length < 2) return alert("Invalid Room ID");
             
+            nameInput.blur(); // [FIX] Remove focus
+            roomInput.blur(); // [FIX] Remove focus
             menu.style.display = 'none';
             window.game = new Game(roomId, false, playerName, null);
         };

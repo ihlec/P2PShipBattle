@@ -12,7 +12,9 @@ export default class Network {
         this.roomId = roomId;
         this.isHost = isHost;
         this.playerName = playerName;
+        
         this.lastEntitySyncTime = 0;
+        this.lastPlayerSyncTime = 0; // [NEW] Timer for player sync
         this.hostId = null; 
         
         const config = { 
@@ -95,7 +97,7 @@ export default class Network {
                 this.game.world.importData({
                     seed: data.seed,
                     modifiedTiles: data.modified,
-                    tileData: data.tileData, // [NEW] Import Damage Data
+                    tileData: data.tileData, 
                     time: data.time
                 });
                 
@@ -277,7 +279,7 @@ export default class Network {
         const payload = {
             seed: this.game.world.seed,
             modified: this.game.world.modifiedTiles,
-            tileData: this.game.world.tileData, // [NEW] Send Damage Data
+            tileData: this.game.world.tileData, 
             time: this.game.world.time,
             spawnX: Math.floor(this.game.spawnPoint.x),
             spawnY: Math.floor(this.game.spawnPoint.y)
@@ -331,7 +333,11 @@ export default class Network {
     }
 
     update(deltaTime) {
-        if (Math.random() < 0.3) { 
+        const now = Date.now();
+        
+        // [MODIFIED] Stable 50ms sync rate instead of random chance
+        if (now - this.lastPlayerSyncTime > 50) { 
+            this.lastPlayerSyncTime = now;
             this.actions.sendPlayer({
                 x: Math.floor(this.game.player.x),
                 y: Math.floor(this.game.player.y),
@@ -344,7 +350,6 @@ export default class Network {
         }
         
         if (this.isHost) {
-             const now = Date.now();
              if (now - this.lastEntitySyncTime > 50) { 
                  this.lastEntitySyncTime = now;
                  const n = this.game.npcs.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp }));

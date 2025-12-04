@@ -10,7 +10,29 @@ export default class Renderer {
         this.shadowCanvas = document.createElement('canvas');
         this.shadowCtx = this.shadowCanvas.getContext('2d');
         
+        // [NEW] Pre-rendered Light Sprite
+        this.lightSprite = document.createElement('canvas');
+        this.preRenderLight();
+
         this.resize();
+    }
+
+    // [NEW] Create a generic "light blob" once to save performance
+    preRenderLight() {
+        const size = 512;
+        const center = size / 2;
+        this.lightSprite.width = size;
+        this.lightSprite.height = size;
+        const ctx = this.lightSprite.getContext('2d');
+        
+        const grad = ctx.createRadialGradient(center, center, 0, center, center, center);
+        grad.addColorStop(0, "rgba(255, 255, 255, 1)");
+        grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+        
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(center, center, center, 0, Math.PI * 2);
+        ctx.fill();
     }
 
     resize() {
@@ -787,7 +809,6 @@ export default class Renderer {
         this.drawHealth(obj); 
     }
 
-    // [RESTORED]
     renderLighting() { 
         const ambient = this.game.world.getAmbientLight();
         if (ambient <= 0.05) return;
@@ -800,19 +821,21 @@ export default class Renderer {
         
         const toScreen = (wx, wy) => ({ x: (wx - this.game.camera.x) * this.game.zoom, y: (wy - this.game.camera.y) * this.game.zoom });
         
+        // [MODIFIED] Use pre-rendered light sprite for performance
         const drawLight = (wx, wy, radius) => {
             const pos = toScreen(wx, wy);
-            if (pos.x < -radius || pos.y < -radius || pos.x > this.canvas.width + radius || pos.y > this.canvas.height + radius) return;
-            const grad = this.shadowCtx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, radius * this.game.zoom);
-            grad.addColorStop(0, "rgba(255, 255, 255, 1)");
-            grad.addColorStop(1, "rgba(255, 255, 255, 0)");
-            this.shadowCtx.fillStyle = grad;
-            this.shadowCtx.beginPath();
-            this.shadowCtx.arc(pos.x, pos.y, radius * this.game.zoom, 0, Math.PI * 2);
-            this.shadowCtx.fill();
+            const r = radius * this.game.zoom;
+            // Draw pre-rendered sprite instead of creating new gradient
+            this.shadowCtx.drawImage(this.lightSprite, pos.x - r, pos.y - r, r * 2, r * 2);
         };
 
         drawLight(this.game.player.x, this.game.player.y, 150);
+        
+        // [NEW] Make peers glow
+        Object.values(this.game.peers).forEach(p => {
+             drawLight(p.x, p.y, 150);
+        });
+
         this.game.boats.forEach(b => drawLight(b.x, b.y, 120));
         
         const startCol = Math.floor(this.game.camera.x / CONFIG.TILE_SIZE);

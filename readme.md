@@ -24,9 +24,12 @@
 
 
 ## TODO
-- replace player with tombstone when died with same properties as boulder
+- grey out the player prendering when died (ghost)
 - spawn boats 100 tiles away
 - rendering in the build menu
 - when host player is killed on water, boats get stuck
+- npc boats should avoid ramming each other. 
+- raider drop rate
+- make projectiles glow
 
 

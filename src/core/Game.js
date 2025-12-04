@@ -37,7 +37,7 @@ export default class Game {
 
         this.camera = { x: 0, y: 0 };
         this.zoom = 1;
-        this.shake = 0; // [NEW] Screen shake intensity
+        this.shake = 0; 
         
         this.lastFrameTime = 0;
         this.regenTimer = 0;
@@ -117,19 +117,31 @@ export default class Game {
         });
     }
 
+    // [OPTIMIZED] Spiral Search for safer, deterministic spawning
     findSafeSpawnPoint() {
-        for (let i = 0; i < 2000; i++) {
-            const x = (Math.random() - 0.5) * 5000;
-            const y = (Math.random() - 0.5) * 5000;
-            const gx = Math.floor(x / CONFIG.TILE_SIZE);
-            const gy = Math.floor(y / CONFIG.TILE_SIZE);
+        // Start at 0,0 and spiral out looking for land
+        let x = 0, y = 0;
+        let dx = 0, dy = -1;
+        const maxSteps = 1000;
+        
+        for(let i=0; i<maxSteps; i++) {
+            const gx = Math.floor(x);
+            const gy = Math.floor(y);
             const id = this.world.getTile(gx, gy);
             const def = ID_TO_TILE[id];
-
+            
             if (!def.solid && !def.isWater) {
-                 return { x: gx * CONFIG.TILE_SIZE + 16, y: gy * CONFIG.TILE_SIZE + 16 };
+                return { x: gx * CONFIG.TILE_SIZE + 16, y: gy * CONFIG.TILE_SIZE + 16 };
             }
+
+            if (x === y || (x < 0 && x === -y) || (x > 0 && x === 1-y)) {
+                const temp = dx; dx = -dy; dy = temp;
+            }
+            x += dx;
+            y += dy;
         }
+        
+        // Fallback
         return { x: 16, y: 16 };
     }
 
@@ -145,7 +157,6 @@ export default class Game {
     }
 
     update(deltaTime) {
-        // [NEW] Shake Decay
         if (this.shake > 0) this.shake *= 0.9;
         if (this.shake < 0.5) this.shake = 0;
 
@@ -154,7 +165,7 @@ export default class Game {
         this.world.update(deltaTime);
         this.particles.update(this.canvas.width, this.canvas.height, this.world.wind.angle, this.camera, this.zoom);
         
-        this.updatePeers();
+        this.updatePeers(deltaTime); // [FIX] Pass deltaTime
         this.updatePlayer(deltaTime); 
         this.updateEntities(deltaTime);
         this.updateProjectiles();
@@ -527,6 +538,7 @@ export default class Game {
     applyDamageToEntity(entity, damage, isProjectile) {
         if (entity.hp <= 0) return;
         if (entity === this.player && this.godMode) return;
+        if (isNaN(damage)) return; // [FIX] Safety check
 
         if (entity.type === 'peer') {
             if (this.network.isHost) {
@@ -586,7 +598,7 @@ export default class Game {
                 
                 this.network.requestRemove(gx, gy, restoreId);
                 this.spawnParticles(tx, ty, tileDef.color, 10);
-                this.triggerShake(5); // [NEW] Shake on destruction
+                this.triggerShake(5); 
                 this.recalculateCannons();
             } else {
                 this.network.broadcastTileHit(gx, gy, damage);
@@ -676,7 +688,7 @@ export default class Game {
                 const proj = new Projectile(c.x, c.y - 20, target.x, target.y, c.damage, 10, '#000', true, 'cannonball');
                 this.projectiles.push(proj);
                 this.spawnParticles(c.x, c.y - 10, '#888', 3);
-                this.triggerShake(2); // [NEW] Shake on cannon fire
+                this.triggerShake(2); 
 
                 if (this.network.isHost) {
                     this.network.actions.sendCannon({ 
@@ -892,12 +904,20 @@ export default class Game {
         this.shake = Math.min(this.shake + amount, 20);
     }
 
-    updatePeers() { 
+    // [OPTIMIZED] Frame-rate independent smoothing
+    updatePeers(deltaTime) { 
         Object.values(this.peers).forEach(p => {
-            const dx = p.targetX - p.x;
-            const dy = p.targetY - p.y;
-            p.x += dx * 0.15;
-            p.y += dy * 0.15;
+            // Distance Check for Teleport
+            const dist = Math.sqrt((p.targetX - p.x)**2 + (p.targetY - p.y)**2);
+            if (dist > 300) {
+                p.x = p.targetX;
+                p.y = p.targetY;
+            } else {
+                // Smooth Lerp using deltaTime (approx 10% movement per 16ms)
+                const factor = 1 - Math.exp(-0.008 * deltaTime);
+                p.x += (p.targetX - p.x) * factor;
+                p.y += (p.targetY - p.y) * factor;
+            }
 
             if (p.inBoat && p.boatStats) {
                 const lerpAngle = (start, end, amt) => {
@@ -906,7 +926,9 @@ export default class Game {
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     return start + diff * amt;
                 };
-                p.boatStats.heading = lerpAngle(p.boatStats.heading, p.boatStats.targetHeading, 0.1);
+                // Rotate boats smoothly too
+                const rotFactor = 1 - Math.exp(-0.005 * deltaTime);
+                p.boatStats.heading = lerpAngle(p.boatStats.heading, p.boatStats.targetHeading, rotFactor);
             }
         });
     }

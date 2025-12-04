@@ -335,7 +335,8 @@ export class Entity {
                 config.CANNON_SPEED, 
                 '#111', 
                 isPlayer, 
-                'cannonball'
+                'cannonball',
+                this.id // [FIX] Added ownerId so projectiles don't hit the boat that fired them
             );
             
             p.life = config.CANNON_RANGE; 
