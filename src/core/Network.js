@@ -1,4 +1,4 @@
-import { joinRoom } from 'https://cdn.skypack.dev/trystero@0.15.1';
+import { joinRoom } from 'trystero';
 import { Entity } from '../entities/Entity.js';
 import { Sheep } from '../entities/Npc.js';
 import { Boat } from '../entities/Boat.js';

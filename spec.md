@@ -1,143 +1,175 @@
-Based on the comprehensive analysis of the provided source code, here is the detailed Game Design Document (GDD) for **Pixel Warfare**.
+# Game Design Document & Technical Specification: Pixel Warfare
 
-### 1. Game Overview
-* **Title:** Pixel Warfare (also referred to as Pixel Warfare Multiplayer)
-* **Genre:** Top-down 2D Survival / Sandbox / RTS Hybrid
-* **Perspective:** 2D Top-down with dynamic camera zoom
-* **Core Loop:** Gather resources, build defenses, craft weapons, survive invasions, and battle enemy ships or NPC players in a persistent procedural world.
+## 1. Executive Summary
+**Pixel Warfare** is a multiplayer, browser-based, top-down sandbox survival game. It features a procedurally generated infinite world, resource gathering, base building, crafting, and P2P (Peer-to-Peer) combat. The visual style is programmatic pixel art (rendered via Canvas API without external assets).
 
----
-
-### 2. Gameplay Mechanics
-
-#### 2.1 Controls & Input
-* **Movement:** WASD or Arrow Keys for character movement.
-* **Interaction:**
-    * **Left Click:** Build structure, Attack (Melee/Range), Harvest resource.
-    * **Right Click:** Interact (Enter/Exit Boat), Repair structures, Shear sheep.
-    * **Mouse Wheel:** Zoom camera in/out.
-* **Hotkeys:**
-    * **Q / E:** Fire Boat Broadside (Left/Right).
-    * **B:** Toggle Blueprint Menu.
-    * **Esc:** Close Menus.
-    * **G:** Toggle God Mode (Debug/Cheat).
-    * **H:** Force Spawn Enemy Ship (Host only).
-
-#### 2.2 Player Stats & Inventory
-* **Health:** 100 Max HP. Regenerates slowly if safe and HP > 0.
-* **Inventory:** Slots for Stone (Grey), Obsidian (Black), Iron, Gold, Wood, Greens, and Wool.
-* **Equipment:** Active Slot for Melee (Hand/Sword) and Ranged (Stone/Spear).
-
-#### 2.3 Combat System
-* **Melee:** Uses "Hand" (1 dmg), Wood Sword (50 dmg), or Iron Sword (90 dmg). Hits regiter on intersection of the players center.
-* **Ranged:**
-    * **Throwing:** Players can throw Stones (25 dmg), Wood Spears (35 dmg), or Iron Spears (60 dmg).
-    * **Projectiles:** Have travel speed, range, and owner properties (Player vs. Enemy).
-* **Naval Combat:**
-    * **Broadsides:** Boats fire cannonballs perpendicular to heading (Left/Right). Cooldown applies per side.
-    * **Damage:** Cannonballs deal 50 damage and destroy terrain/structures.
-
-#### 2.4 Resource Gathering
-* **Harvesting:**
-    * **Trees:** Drop Wood and chance for Greens.
-    * **Mountains/Boulders:** Drop Stone, chance for Iron, rare chance for Gold.
-    * **Sheep:** Can be sheared for Wool (regrows over time).
-    * **Loot:** Killing enemies drops resources or crates containing wood/iron.
+**Key Technology Stack:**
+* **Language:** Vanilla JavaScript (ES6 Modules)
+* **Rendering:** HTML5 Canvas API (2D Context)
+* **Networking:** WebRTC via `trystero` library (Mesh topology)
+* **Architecture:** Component-based Entity system with a Host-Authoritative/Client-Prediction hybrid model.
 
 ---
 
-### 3. World & Environment
+## 2. File Architecture
+The application is structured into modular components.
 
-#### 3.1 Procedural Generation
-* **Seed System:** Worlds are generated based on a numeric seed, synced across network.
-* **Biomes:** Determined by elevation noise and moisture noise:
-    * **Deep Ocean / Ocean:** Water tiles (solid to walking players, passable by boats).
-    * **Sand:** Beach areas.
-    * **Grass:** Standard terrain, contains Trees and Greens.
-    * **Mountain:** High elevation, contains Stone/Ores.
+* **Root:** `index.html` (DOM UI), `styles.css` (Overlay styling).
+* **`src/main.js`:** Entry point. Handles menu logic (Host/Join/Load) and initializes the `Game` instance.
+* **`src/config.js`:** Centralized constants (Tile IDs, Colors, Stats, Game Rules).
+* **`src/utils.js`:** Math helpers (Noise generation, Hashing, Lerping, Distance calculations).
+* **`src/core/`**:
+    * `Game.js`: Main loop, system orchestration, state management.
+    * `Network.js`: Manages P2P connections, data serialization, and state synchronization.
+    * `InputHandler.js`: Maps keyboard/mouse events to game state variables.
+* **`src/world/`**:
+    * `World.js`: Procedural terrain generation, chunk management, time cycle.
+    * `ParticleSystem.js`: Visual effects (explosions, wind, floating text).
+* **`src/entities/`**:
+    * `Entity.js`: Base class for moving objects (Player logic included).
+    * `Boat.js`: Specialized water physics and vehicle logic.
+    * `Npc.js`: AI behavior for passive (Sheep) and aggressive (Raider) mobs.
+    * `Projectile.js`: Physics for spears, stones, and cannonballs.
+* **`src/systems/`**:
+    * `Renderer.js`: Handles all Canvas drawing operations, camera, and culling.
+    * `UIManager.js`: DOM manipulation for Inventory, Crafting, and HUD.
 
-#### 3.2 Dynamic Systems
+---
+
+## 3. World Generation & Environment
+The world is infinite and deterministic based on a numeric seed.
+
+### 3.1. Terrain Algorithm
+* **Noise Function:** 2D Value Noise with pseudo-random hashing.
+* **Biome Mapping:** Terrain is generated based on elevation heightmaps:
+    * **Deep Water:** < -0.2
+    * **Water:** < 0.25
+    * **Sand:** < 0.30
+    * **Grass:** < 0.60 (Contains Trees and scattered Rocks based on secondary noise layers)
+    * **Mountain:** > 0.60
+* **Modifications:** The game must store a hash map of `modifiedTiles` to persist user changes (placed walls, destroyed trees) over the procedural base.
+
+### 3.2. Environmental Systems
 * **Day/Night Cycle:**
-    * **Duration:** 24,000 ticks (approx 20 mins).
-    * **Phases:** Day, Sunset (0.25-0.35), Night (0.35-0.65), Sunrise (0.65-0.75).
-    * **Lighting:** Darkness opacity increases at night. Light sources (Torches, Towers, Player) cut through darkness using a shadow canvas.
+    * Cycle length: ~24,000 ticks.
+    * Phases: Day (0.0), Sunset (0.25), Night (0.5), Sunrise (0.75).
+    * Visuals: A darkness overlay opacity ranges from 0.0 to 0.95.
 * **Wind System:**
-    * Global wind direction changes over time.
-    * Visualized by wind particles.
-    * Affects Boat sailing speed and tacking efficiency.
+    * Global wind angle rotates slowly over time.
+    * Affects Particle System (wind lines) and Boat sailing physics.
 
 ---
 
-### 4. Construction & Crafting
+## 4. Entity Systems
 
-#### 4.1 Building System
-* **Blueprints:** Players select structures from a menu. Structures check for "Solid" collisions before placement.
-* **Repair:** Damaged structures can be repaired using Wood (for wood structures) or Stone (for stone structures).
+### 4.1. Player
+* **Movement:** WASD. Standard speed (2.0), slower on water, faster on roads. Collision detection uses a "slide" mechanic (check X axis, then Y axis independently) against Solid tiles.
+* **Inventory:** Tracks material counts (Wood, Stone, Iron, Gold, Wool, etc.).
+* **Combat:**
+    * **Melee:** Hand, Wood Sword, Iron Sword. Short-range hitscan.
+    * **Ranged:** Stones, Wood Spear, Iron Spear. Spawns Projectile entities.
+* **Respawn:** 3-second timer on death. Drops no items (currently).
 
-**Buildable Structures:**
-| Structure | Cost | Special Properties |
-| :--- | :--- | :--- |
-| **Stone Tower** | 4 Stone, 1 Wood | 150 HP, emits light, auto-fires cannons (20 dmg). |
-| **Iron Tower** | 1 Stone, 3 Iron, 1 Wood | 300 HP, emits light, auto-fires cannons (40 dmg). |
-| **Gold Tower** | 1 Stone, 3 Gold, 1 Wood | 500 HP, emits light, auto-fires cannons (80 dmg). |
-| **Stone Wall** | 2 Stone | 100 HP, solid barrier. |
-| **Fence/Gate** | 2 Wood | 50 HP, can be toggled open/closed. |
-| **Bridge** | 1 Stone, 1 Wood | Allows movement over water. |
-| **Road** | 1 Stone | Increases player movement speed. |
-| **Boat** | 5 Wood, 2 Wool | Spawns a controllable vehicle in water. |
-| **Torch** | 1 Wood, 1 Obsidian | 10 HP, provides light. |
+### 4.2. Boat (Vehicle)
+* **Boarding:** Players interact to enter/exit. Player acts as the controller.
+* **Physics:**
+    * **Thrust:** Based on Sail Level + Wind Alignment.
+    * **Steering:** Rudder angle adds angular velocity.
+    * **Drift:** High lateral drag, low forward drag to simulate a keel.
+* **Combat:**
+    * **Broadside Cannons:** keys `Q` (Left) and `E` (Right). Fires 3 cannonballs in a spread pattern. Cooldown: 2 seconds.
 
-#### 4.2 Weapon Crafting
-* **Obsidian Spear:** 1 Obsidian, 2 Wood.
-* **Iron Spear:** 1 Wood, 2 Iron.
-* **Obsidian Sword:** 1 Obsidian, 2 Wood.
-* **Iron Sword:** 2 Iron, 1 Gold.
-
----
-
-### 5. Entities & AI
-
-#### 5.1 The Boat
-* **Movement:** Physics-based. Requires "tacking" against the wind for optimal speed. Includes sail raising/lowering.
-* **Capacity:** Can carry a driver (Player or Enemy).
-* **Mechanics:** Has hull HP, rudder control, and momentum drag.
-
-#### 5.2 NPCs (Enemies)
-* **Type:** "Invaders" or Minions spawned from Enemy Boats.
-* **AI Behavior:** State machine with modes: `Chase` -> `Charge` -> `Rest`.
-* **Attacks:** Melee contact damage.
-* **Invasions:** Host triggers enemy boat spawns periodically. Enemy boats navigate to player and spawn minions on land.
-
-#### 5.3 Animals (Sheep)
-* **Behavior:** Wander randomly, seek "Greens" to eat.
-* **Mechanics:** Can be fed Greens to reproduce (spawn babies). Can be sheared for Wool. Drops meat/wool on death.
+### 4.3. NPCs
+* **Host Authority:** Only the Host calculates AI; Clients receive position/state updates.
+* **Sheep:** Wander randomly. Can be sheared (Right-click) for Wool. Wool regrows.
+* **Raiders:**
+    * Spawn in waves or from Enemy Boats.
+    * AI: Pathfind to nearest Player or Player Structure.
+    * Attack: Melee combat. Can destroy blocks.
+    * Loot: Drops varied resources (Stone, Iron, Gold) on death.
 
 ---
 
-### 6. Multiplayer & Network
-* **Architecture:** Peer-to-Peer (P2P) mesh networking using `Trystero`.
-* **Roles:**
-    * **Host:** Generates world seed, manages AI/NPCs, authorizes building placement, manages time/wind.
-    * **Client:** Syncs world data from host, sends input/position updates, renders locally.
-* **Synchronization:**
-    * World Data (Seed, modified tiles).
-    * Player Positions (Interpolated).
-    * Combat Events (Damage/Projectiles).
+## 5. Gameplay Mechanics
+
+### 5.1. Building & Crafting
+* **Blueprint System:**
+    * Items: Walls, Towers, Fences, Bridges, Roads, Boats.
+    * Cost: deducted from inventory upon placement.
+* **Placement Rules:**
+    * Cannot place on occupied tiles.
+    * Boats must be placed on water.
+    * Towers/Walls cannot be placed on water (unless Bridge).
+* **Structures:**
+    * **Towers:** Auto-turrets. Require `Iron` ammo (refillable). Fire at nearest enemy.
+    * **Walls:** Passive HP blocks.
+
+### 5.2. Invasion System ("Peace Timer")
+* **Logic:** The Host tracks time since the last "Player Damage Event."
+* **Trigger:** A random threshold (between 5 to 15 minutes).
+* **Event:** If the timer exceeds the threshold, an Enemy Boat is spawned off-screen.
+* **Reset:** Any damage taken by a player resets the timer to 0.
+
+### 5.3. Interaction
+* **Left Click:** Build (if blueprint active) OR Attack/Throw Projectile.
+* **Right Click:** Cancel Build, Interact (Enter Boat, Shear Sheep, Open Gate).
 
 ---
 
-### 7. Technical Specifications
-* **Engine:** Custom Vanilla JS engine with HTML5 Canvas.
-* **Tile Size:** 32x32 pixels.
-* **Resolution:** Fullscreen, responsive to window resize.
-* **Persistence:** LocalStorage support (`pixelWarfareSave`) for saving/loading world state (Host only).
+## 6. Network Specification
 
-### 8. User Interface (HUD)
-* **Top Left:** Room Code, Health, Coordinates, Biome, Elevation, Seed.
-* **Bottom Left:** Action Bar (Hammer/Sword toggle).
-* **Bottom Center:** Inventory Bar (Resource counts).
-* **Bottom Right:** Equipped Weapon slot.
-* **Overlays:** Main Menu (Name input, Host/Join), Floating "Blueprint" and "Weapon" grids.
+### 6.1. Connection
+* **Library:** `trystero` (BitTorrent style signaling).
+* **Trackers:** Must implement redundant parallel connection attempts to multiple public trackers (e.g., `openwebtorrent`, `btorrent`, `sigterm`) to ensure reliability.
 
-### Next Step
-Would you like me to analyze the code for potential bugs or optimizations, or perhaps generate a user manual based on this spec?
+### 6.2. Protocol (Action Types)
+* `init`: Handshake, exchange usernames.
+* `world`: Host sends Seed, Modified Tiles Map, and Time to new joiners.
+* `player`: Client sends X, Y, Input State, Health, Boat Status (Freq: ~50ms).
+* `ents`: Host sends arrays of NPC, Boat, and Loot positions/states (Freq: ~50ms).
+* `tileReq` / `tileUpd`: Client requests build/destroy; Host validates and broadcasts result.
+* `damage`: Syncs damage events.
+
+### 6.3. Joining Logic (Safe Spawn)
+* When a client receives the World data, they must calculate a spawn point.
+* **Algorithm:** Spiral search or Random radius search around the Host's location.
+* **Validation:** Spawn point must **not** be Water and **not** be Solid collision.
+
+---
+
+## 7. Rendering & Audio
+
+### 7.1. Camera
+* Center on Player.
+* Smooth Lerp (Linear Interpolation) for movement.
+* **Screenshake:** Triggered by explosions, damage, or cannon fire.
+
+### 7.2. Z-Indexing (Y-Sort)
+* Entities must be drawn in order of their Y-coordinate to create a pseudo-3D perspective (objects lower on screen draw *over* objects higher on screen).
+
+### 7.3. Lighting
+* **Ambient:** Global darkness rectangle drawn over the screen.
+* **Sources:** Players, Torches, and Towers emit light.
+* **Implementation:** Use a secondary off-screen canvas. Draw "lights" using Radial Gradients (white to transparent). Draw the Shadow Canvas onto the Main Canvas using `destination-out` composite operation.
+
+### 7.4. Programmatic Assets
+* **No Images:** All graphics are drawn using `ctx.fillRect`, `ctx.arc`, `ctx.moveTo/lineTo`.
+* **Style:** Pixelated (using `image-rendering: pixelated` in CSS).
+* **Boats:** Complex shape drawing (Deck, Hull, Mast, Sail).
+* **Particles:** Simple squares that fade alpha over time.
+
+---
+
+## 8. UI/UX
+* **HUD:**
+    * Top Left: Room Code, Coordinates.
+    * Bottom Center: Inventory Bar (Clickable slots).
+    * Bottom Right: Weapon Slots.
+    * Center: Floating "Messages" (e.g., "Peace Broken!").
+* **Menus:**
+    * Main Menu: Overlay div with Name Input, Host/Join buttons.
+    * Blueprint Menu: Grid of craftable items with costs, toggled via 'B' key or Hammer icon.
+
+## 9. Persistence
+* **Storage:** `localStorage`.
+* **Saved Data:** World Seed, Modified Tiles (Map), Player Position/Inventory/Health, Boat locations, and Invasion Timer state.

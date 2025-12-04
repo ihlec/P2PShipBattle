@@ -48,9 +48,9 @@ export default class Game {
         this.invasionTimer = (loadData && loadData.invasion) ? (loadData.invasion.timer || 0) : 0;
         this.nextInvasionTime = (loadData && loadData.invasion) ? (loadData.invasion.next || 0) : 0;
 
-        // [NEW] Peace Timer Init
         this.peaceTimer = 0;
         this.peaceThreshold = this.getNewPeaceThreshold();
+        this.peaceMsgTimer = null; // [NEW] Timer reference for clearing messages
 
         this.initializeGame(isHost, loadData);
         this.setupBindings();
@@ -58,7 +58,6 @@ export default class Game {
         requestAnimationFrame(timestamp => this.gameLoop(timestamp));
     }
 
-    // [NEW] Helper to get random time between 5 and 15 minutes (ms)
     getNewPeaceThreshold() {
         const min = 2 * 60 * 1000;
         const max = 7 * 60 * 1000;
@@ -785,6 +784,12 @@ export default class Game {
                 this.boats.push(enemyBoat);
                 this.spawnText(enemyBoat.x, enemyBoat.y, "PEACE BROKEN!", "#ff0000");
                 this.showMessage("A NEW ENEMY APPROACHES", "#f00");
+                
+                // [FIX] Clear the message after 4 seconds
+                if (this.peaceMsgTimer) clearTimeout(this.peaceMsgTimer);
+                this.peaceMsgTimer = setTimeout(() => {
+                    this.showMessage("", "#fff");
+                }, 4000);
             }
             this.peaceTimer = 0;
             this.peaceThreshold = this.getNewPeaceThreshold();
@@ -995,7 +1000,11 @@ export default class Game {
         }
     }
     
-    showMessage(txt, col) { document.getElementById('messages').innerText = txt; }
+    showMessage(txt, col) { 
+        const el = document.getElementById('messages');
+        el.innerText = txt;
+        if(col) el.style.color = col;
+    }
     
     cycleRangeWeapon() {
         const cycle = [TILES.GREY.id, TILES.SPEAR_WOOD.id, TILES.SPEAR_IRON.id];
