@@ -57,11 +57,9 @@ export class Boat extends Entity {
         const tile = world.getTile(gridX, gridY);
         const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
 
-        // [MODIFIED] 1. Search for targets in combat range
         let target = this.findClosestTarget(game, 2000);
         let isPatrolling = false;
 
-        // [MODIFIED] 2. If no target, patrol towards any distant player
         if (!target) {
             target = this.findClosestTarget(game, 50000); // Global scan
             isPatrolling = true;
@@ -70,7 +68,41 @@ export class Boat extends Entity {
         if (isWater && target) {
             const dist = Utils.distance(this, target);
             const input = { up: false, down: false, left: false, right: false };
-            const angleToTarget = Math.atan2(target.y - this.y, target.x - this.x);
+            
+            // [NEW] Separation Logic (Avoid ramming friends)
+            let sepX = 0;
+            let sepY = 0;
+            const separationRadius = 150; 
+
+            game.boats.forEach(other => {
+                if (other !== this && other.owner === 'enemy' && other.hp > 0) {
+                    const d = Utils.distance(this, other);
+                    if (d < separationRadius) {
+                        // Calculate push vector away from neighbor
+                        const pushX = this.x - other.x;
+                        const pushY = this.y - other.y;
+                        const strength = (separationRadius - d) / separationRadius; // Stronger when closer
+                        sepX += (pushX / d) * strength * 3.0; // 3.0 = weight of separation
+                        sepY += (pushY / d) * strength * 3.0;
+                    }
+                }
+            });
+
+            // Calculate Base Heading to Target
+            const dx = target.x - this.x;
+            const dy = target.y - this.y;
+            // Normalize target vector roughly
+            const distToT = Math.sqrt(dx*dx + dy*dy) || 1;
+            const targetDirX = dx / distToT;
+            const targetDirY = dy / distToT;
+
+            // Combine Target Vector + Separation Vector
+            const finalDirX = targetDirX + sepX;
+            const finalDirY = targetDirY + sepY;
+
+            // Calculate final desired angle
+            const angleToTarget = Math.atan2(finalDirY, finalDirX);
+            const rawAngleToTarget = Math.atan2(dy, dx); // Pure angle for shooting calculation
             
             let heading = this.boatStats.heading % (Math.PI * 2);
             if (heading > Math.PI) heading -= Math.PI * 2;
@@ -80,7 +112,7 @@ export class Boat extends Entity {
             const BROADSIDE_RANGE = 300;
             const MIN_RANGE = 150;
 
-            // Attempt to flank for broadside only if in combat range
+            // Attempt to flank for broadside only if in combat range AND effectively chasing
             if (!isPatrolling && dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
                 let relative = angleToTarget - heading;
                 while (relative > Math.PI) relative -= Math.PI * 2;
@@ -116,8 +148,8 @@ export class Boat extends Entity {
 
             this.updateBoatMovement(input, deltaTime, world, game);
 
-            // Fire Broadside (Only if close enough)
-            let angleRelative = angleToTarget - heading;
+            // Fire Broadside (Using raw angle to target, ignoring avoidance vector for aiming)
+            let angleRelative = rawAngleToTarget - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
             while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
             const broadsideThreshold = 0.3;
@@ -132,7 +164,6 @@ export class Boat extends Entity {
         this.updateWaveLogic(game, world);
     }
 
-    // [MODIFIED] Added scanRange parameter
     findClosestTarget(game, scanRange = 2000) {
         let closest = null;
         let minDst = scanRange; 
