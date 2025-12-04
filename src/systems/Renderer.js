@@ -212,7 +212,6 @@ export default class Renderer {
                         if (obj._orig.inBoat) {
                             const heading = (obj._orig.boatStats && obj._orig.boatStats.heading !== undefined) ? obj._orig.boatStats.heading : 0;
                             
-                            // [FIX] Pass actual HP from entity (which is boat structure HP) instead of hardcoded 100
                             this.drawBoat(obj.x, obj.y, heading, 'player', obj._orig.hp, 100, obj._orig);
                             
                             this.ctx.save();
@@ -526,6 +525,40 @@ export default class Renderer {
         this.ctx.quadraticCurveTo(-width / 2 + 2, startY + height / 3, 0, startY + 6);
         this.ctx.fill();
 
+        // [NEW] Better Damage Visuals (Smoke)
+        const hpPct = hp / maxHp;
+        if (hpPct < 0.5) {
+             const time = Date.now();
+             
+             // Volumetric Smoke Effect
+             for(let i=0; i<5; i++) {
+                 const cycleDuration = 1000;
+                 const offset = i * (cycleDuration / 5);
+                 const t = (time + offset) % cycleDuration;
+                 const pct = t / cycleDuration; // 0 to 1
+                 
+                 // Physics: drift "back" (down in local Y) and expanding
+                 const driftY = pct * 15; 
+                 const driftX = Math.sin(t * 0.005) * 5;
+                 const size = 4 + pct * 6;
+                 const alpha = (1 - pct) * 0.6;
+
+                 this.ctx.fillStyle = `rgba(100,100,100,${alpha})`;
+                 this.ctx.beginPath();
+                 this.ctx.arc(driftX, driftY, size, 0, Math.PI*2);
+                 this.ctx.fill();
+             }
+             
+             if (hpPct < 0.25) {
+                // Fire (Flickering core)
+                const flicker = (Math.random() > 0.5) ? '#ff4400' : '#ffaa00';
+                this.ctx.fillStyle = flicker;
+                this.ctx.beginPath();
+                this.ctx.arc(0, 5, 4 + Math.random()*2, 0, Math.PI*2);
+                this.ctx.fill();
+             }
+        }
+
         let mastX = 0, mastY = 0, hasMast = false;
         
         for (let r = 0; r < rows; r++) {
@@ -623,6 +656,27 @@ export default class Renderer {
             this.ctx.restore();
         }
         
+        // Reload Indicators
+        if (boatData && boatData.boatStats) {
+             const stats = boatData.boatStats;
+             const maxCd = CONFIG.BOAT.BROADSIDE_COOLDOWN;
+             
+             // Draw Bars
+             const drawBar = (pct, xOff) => {
+                 if (pct >= 0.99) return; // Full
+                 const h = 40;
+                 const w = 4;
+                 const fillH = h * pct;
+                 this.ctx.fillStyle = '#333';
+                 this.ctx.fillRect(xOff, -h/2, w, h);
+                 this.ctx.fillStyle = '#ff0';
+                 this.ctx.fillRect(xOff, -h/2 + (h-fillH), w, fillH);
+             };
+
+             if (stats.cooldownLeft > 0) drawBar(1 - (stats.cooldownLeft/maxCd), -width/2 - 8);
+             if (stats.cooldownRight > 0) drawBar(1 - (stats.cooldownRight/maxCd), width/2 + 4);
+        }
+
         this.ctx.restore();
         this.drawHealth({ x, y, hp, maxHp }); 
     }
@@ -654,6 +708,7 @@ export default class Renderer {
         this.drawHealth(obj); 
     }
 
+    // [RESTORED]
     drawCharacter(obj, isPlayer, isEnemy = false) { 
         let colorShirt, colorPants, colorSkin;
 
@@ -732,6 +787,7 @@ export default class Renderer {
         this.drawHealth(obj); 
     }
 
+    // [RESTORED]
     renderLighting() { 
         const ambient = this.game.world.getAmbientLight();
         if (ambient <= 0.05) return;
