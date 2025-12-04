@@ -39,7 +39,7 @@ Because this project uses ES6 Modules, you cannot simply open `index.html` direc
 | **Q / E** | Broadside Cannons (In Boat) |
 
 -----
-
+```
 /
 ├── index.html
 ├── styles.css
@@ -62,7 +62,7 @@ Because this project uses ES6 Modules, you cannot simply open `index.html` direc
     └── systems/
         ├── Renderer.js
         └── UIManager.js
-
+```
 
 
 ## TODO
