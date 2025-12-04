@@ -27,8 +27,9 @@ export class Boat extends Entity {
     static createInvasionForce(game) {
         const player = game.player;
         const world = game.world;
-        const minDist = 250;
-        const maxDist = 550;
+        
+        const minDist = 3000; 
+        const maxDist = 4000;
 
         for (let i = 0; i < 20; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -56,8 +57,15 @@ export class Boat extends Entity {
         const tile = world.getTile(gridX, gridY);
         const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
 
-        // [MODIFIED] Find closest target instead of hardcoding "player"
-        const target = this.findClosestTarget(game);
+        // [MODIFIED] 1. Search for targets in combat range
+        let target = this.findClosestTarget(game, 2000);
+        let isPatrolling = false;
+
+        // [MODIFIED] 2. If no target, patrol towards any distant player
+        if (!target) {
+            target = this.findClosestTarget(game, 50000); // Global scan
+            isPatrolling = true;
+        }
 
         if (isWater && target) {
             const dist = Utils.distance(this, target);
@@ -72,8 +80,8 @@ export class Boat extends Entity {
             const BROADSIDE_RANGE = 300;
             const MIN_RANGE = 150;
 
-            // Attempt to flank for broadside if within range
-            if (dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
+            // Attempt to flank for broadside only if in combat range
+            if (!isPatrolling && dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
                 let relative = angleToTarget - heading;
                 while (relative > Math.PI) relative -= Math.PI * 2;
                 while (relative < -Math.PI) relative += Math.PI * 2;
@@ -108,24 +116,26 @@ export class Boat extends Entity {
 
             this.updateBoatMovement(input, deltaTime, world, game);
 
-            // Fire Broadside
+            // Fire Broadside (Only if close enough)
             let angleRelative = angleToTarget - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
             while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
             const broadsideThreshold = 0.3;
             
-            if (Math.abs(angleRelative - (-Math.PI / 2)) < broadsideThreshold) this.shootBroadside(game, 'left');
-            if (Math.abs(angleRelative - (Math.PI / 2)) < broadsideThreshold) this.shootBroadside(game, 'right');
+            if (dist < 500) { 
+                if (Math.abs(angleRelative - (-Math.PI / 2)) < broadsideThreshold) this.shootBroadside(game, 'left');
+                if (Math.abs(angleRelative - (Math.PI / 2)) < broadsideThreshold) this.shootBroadside(game, 'right');
+            }
         }
 
         // --- Wave Spawn Logic ---
         this.updateWaveLogic(game, world);
     }
 
-    // [NEW] Helper to target closest player/peer
-    findClosestTarget(game) {
+    // [MODIFIED] Added scanRange parameter
+    findClosestTarget(game, scanRange = 2000) {
         let closest = null;
-        let minDst = 1000; // Search range
+        let minDst = scanRange; 
 
         // Combine Host and Peers
         const potentialTargets = [game.player, ...Object.values(game.peers)];
