@@ -26,6 +26,8 @@
 ## TODO
 - npc boats should avoid ramming each other. 
 - joining player might spawn in water if host is next to water
+- allow building stronger ship with much more HP
+- balance building costs according to drop rates
 
 
 

@@ -14,14 +14,19 @@ export default class Network {
         this.playerName = playerName;
         
         this.lastEntitySyncTime = 0;
-        this.lastPlayerSyncTime = 0; // [NEW] Timer for player sync
+        this.lastPlayerSyncTime = 0; 
         this.hostId = null; 
         
+        // [UPDATED] Expanded tracker list for reliability and parallel requests
         const config = { 
             appId: 'pixel-warfare-v2',
             trackerUrls: [
-                'wss://tracker.webtorrent.dev', 
-                'wss://tracker.openwebtorrent.com'
+                'wss://tracker.openwebtorrent.com',      // Primary
+                'wss://tracker.btorrent.xyz',            // Secondary
+                'wss://tracker.webtorrent.dev',          // Original (often unstable)
+                'wss://tracker.files.fm:7073/announce',  // Backup 1
+                'wss://qot.somnolescent.net',            // Backup 2
+                'wss://tracker.sigterm.xyz'              // Backup 3
             ]
         };
         this.room = joinRoom(config, roomId);
@@ -335,7 +340,7 @@ export default class Network {
     update(deltaTime) {
         const now = Date.now();
         
-        // [MODIFIED] Stable 50ms sync rate instead of random chance
+        // Stable 50ms sync rate instead of random chance
         if (now - this.lastPlayerSyncTime > 50) { 
             this.lastPlayerSyncTime = now;
             this.actions.sendPlayer({

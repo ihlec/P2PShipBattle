@@ -48,10 +48,21 @@ export default class Game {
         this.invasionTimer = (loadData && loadData.invasion) ? (loadData.invasion.timer || 0) : 0;
         this.nextInvasionTime = (loadData && loadData.invasion) ? (loadData.invasion.next || 0) : 0;
 
+        // [NEW] Peace Timer Init
+        this.peaceTimer = 0;
+        this.peaceThreshold = this.getNewPeaceThreshold();
+
         this.initializeGame(isHost, loadData);
         this.setupBindings();
         
         requestAnimationFrame(timestamp => this.gameLoop(timestamp));
+    }
+
+    // [NEW] Helper to get random time between 5 and 15 minutes (ms)
+    getNewPeaceThreshold() {
+        const min = 2 * 60 * 1000;
+        const max = 7 * 60 * 1000;
+        return min + Math.random() * (max - min);
     }
 
     initializeGame(isHost, loadData) {
@@ -107,12 +118,10 @@ export default class Game {
         });
     }
 
-    // [OPTIMIZED] Hybrid Spawn Strategy: Spiral (Center) -> Random (Global)
     findSafeSpawnPoint() {
-        // 1. Spiral Search: Try to find land near 0,0 first
         let x = 0, y = 0;
         let dx = 0, dy = -1;
-        const maxSpiralSteps = 10000; // Increased radius significantly
+        const maxSpiralSteps = 10000; 
         
         for(let i=0; i<maxSpiralSteps; i++) {
             const gx = Math.floor(x);
@@ -131,10 +140,9 @@ export default class Game {
             y += dy;
         }
         
-        // 2. Random Fallback: If spiral fails (huge ocean), just pick random spots
         console.warn("Spiral spawn failed. Attempting global random search...");
         for(let i=0; i<1000; i++) {
-            const rx = Math.floor((Math.random() - 0.5) * 2000); // Check +/- 1000 tiles
+            const rx = Math.floor((Math.random() - 0.5) * 2000); 
             const ry = Math.floor((Math.random() - 0.5) * 2000);
             const id = this.world.getTile(rx, ry);
             const def = ID_TO_TILE[id];
@@ -144,7 +152,6 @@ export default class Game {
             }
         }
 
-        // 3. Absolute Last Resort
         return { x: 16, y: 16 };
     }
 
@@ -501,7 +508,6 @@ export default class Game {
         if (type === 'sheep') { 
             dropId = TILES.WOOL.id; qty = 2; 
         } else if (type === 'raider') {
-            // [NEW] Raider Drops: 70% Stone, 15% Obsidian, 10% Iron, 5% Gold
             const r = Math.random();
             if (r < 0.70) dropId = TILES.GREY.id;
             else if (r < 0.85) dropId = TILES.BLACK.id;
@@ -549,7 +555,12 @@ export default class Game {
     applyDamageToEntity(entity, damage, isProjectile) {
         if (entity.hp <= 0) return;
         if (entity === this.player && this.godMode) return;
-        if (isNaN(damage)) return; // [FIX] Safety check
+        if (isNaN(damage)) return; 
+
+        // [NEW] Reset Peace Timer on Player Damage
+        if (this.network.isHost && (entity.type === 'player' || entity.type === 'peer')) {
+            this.peaceTimer = 0;
+        }
 
         if (entity.type === 'peer') {
             if (this.network.isHost) {
@@ -716,6 +727,9 @@ export default class Game {
 
     updateHostAI(dt) {
          if (!this.network.isHost) return;
+        
+         // [NEW] Handle Peace Timer Logic
+         this.handlePeaceTimer(dt);
 
          if (this.animals.length < 10 && Math.random() < 0.005) {
             const ang = Math.random() * 6.28;
@@ -760,6 +774,21 @@ export default class Game {
                  b.updateAI(dt, this.player, this.world, this);
              }
          });
+    }
+
+    // [NEW] Check timer and spawn additional ship if peace is broken
+    handlePeaceTimer(dt) {
+        this.peaceTimer += dt;
+        if (this.peaceTimer >= this.peaceThreshold) {
+            const enemyBoat = Boat.createInvasionForce(this);
+            if (enemyBoat) {
+                this.boats.push(enemyBoat);
+                this.spawnText(enemyBoat.x, enemyBoat.y, "PEACE BROKEN!", "#ff0000");
+                this.showMessage("A NEW ENEMY APPROACHES", "#f00");
+            }
+            this.peaceTimer = 0;
+            this.peaceThreshold = this.getNewPeaceThreshold();
+        }
     }
 
     findClosestTarget(npc) {
@@ -810,7 +839,6 @@ export default class Game {
             const status = p.update();
             if (!p.active) return;
 
-            // [NEW] Water Splash
             if (status === 'expired') {
                  const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
                  const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
@@ -850,7 +878,6 @@ export default class Game {
     
     cleanupEntities() {
          if (this.network.isHost) {
-            // [NEW] Raider Loot Drop Logic
             const deadNpcs = this.npcs.filter(n => n.hp <= 0);
             deadNpcs.forEach(n => {
                 this.spawnLoot(n.x, n.y, 'raider'); 
@@ -875,7 +902,7 @@ export default class Game {
         this.deathCount++;
         this.respawnTimer = 3000 + (this.deathCount * 2000);
         this.spawnParticles(this.player.x, this.player.y, '#f00', 30);
-        this.triggerShake(15); // [NEW] Big shake on death
+        this.triggerShake(15); 
         this.showMessage(`YOU DIED! RESPAWN IN ${Math.ceil(this.respawnTimer / 1000)}s`, "#f00");
     }
 
@@ -906,7 +933,6 @@ export default class Game {
         const viewWidth = this.canvas.width / this.zoom;
         const viewHeight = this.canvas.height / this.zoom;
         
-        // [NEW] Add Shake Offset
         let shakeX = 0, shakeY = 0;
         if (this.shake > 0) {
             shakeX = (Math.random() - 0.5) * this.shake;
@@ -917,21 +943,17 @@ export default class Game {
         this.camera.y = this.player.y - viewHeight / 2 + shakeY;
     }
     
-    // [NEW] Trigger Shake
     triggerShake(amount) {
         this.shake = Math.min(this.shake + amount, 20);
     }
 
-    // [OPTIMIZED] Frame-rate independent smoothing
     updatePeers(deltaTime) { 
         Object.values(this.peers).forEach(p => {
-            // Distance Check for Teleport
             const dist = Math.sqrt((p.targetX - p.x)**2 + (p.targetY - p.y)**2);
             if (dist > 300) {
                 p.x = p.targetX;
                 p.y = p.targetY;
             } else {
-                // Smooth Lerp using deltaTime (approx 10% movement per 16ms)
                 const factor = 1 - Math.exp(-0.008 * deltaTime);
                 p.x += (p.targetX - p.x) * factor;
                 p.y += (p.targetY - p.y) * factor;
@@ -944,7 +966,6 @@ export default class Game {
                     while (diff < -Math.PI) diff += Math.PI * 2;
                     return start + diff * amt;
                 };
-                // Rotate boats smoothly too
                 const rotFactor = 1 - Math.exp(-0.005 * deltaTime);
                 p.boatStats.heading = lerpAngle(p.boatStats.heading, p.boatStats.targetHeading, rotFactor);
             }
