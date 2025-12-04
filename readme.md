@@ -24,9 +24,8 @@
 
 
 ## TODO
-- grey out the player rendering when died (ghost)
-- when host player is killed on water, boats get stuck
 - npc boats should avoid ramming each other. 
+- joining player might spawn in water if host is next to water
 
 
 

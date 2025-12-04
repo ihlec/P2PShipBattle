@@ -10,14 +10,13 @@ export default class Renderer {
         this.shadowCanvas = document.createElement('canvas');
         this.shadowCtx = this.shadowCanvas.getContext('2d');
         
-        // [NEW] Pre-rendered Light Sprite
+        // Pre-rendered Light Sprite
         this.lightSprite = document.createElement('canvas');
         this.preRenderLight();
 
         this.resize();
     }
 
-    // [NEW] Create a generic "light blob" once to save performance
     preRenderLight() {
         const size = 512;
         const center = size / 2;
@@ -192,6 +191,7 @@ export default class Renderer {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'boat') {
                         const stats = obj._orig.boatStats || { heading: 0 };
+                        // [FIX] Ensure this.drawBoat is called
                         this.drawBoat(obj.x, obj.y, stats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
                     } else if (obj._type === 'loot') {
                         const gx = Math.floor(obj.x / CONFIG.TILE_SIZE);
@@ -228,6 +228,7 @@ export default class Renderer {
                         }
 
                     } else if (obj._type === 'sheep') {
+                        // [FIX] Ensure this.drawSheep is called
                         this.drawSheep(obj._orig); 
                     } else if (obj._type === 'player' || obj._type === 'peer') { 
                         const isPlayer = obj._type === 'player';
@@ -243,6 +244,7 @@ export default class Renderer {
                             this.ctx.fillRect(-4, -4, 8, 8); 
                             this.ctx.restore();
                         } else {
+                            // [FIX] Ensure this.drawCharacter is called
                             this.drawCharacter(obj._orig, isPlayer); 
                             if (!isPlayer && obj._orig.name) {
                                 this.ctx.fillStyle = '#fff';
@@ -505,7 +507,7 @@ export default class Renderer {
     }
 
     drawHealth(e) { 
-        if (e.hp >= e.maxHp) return;
+        if (e.hp >= e.maxHp || e.hp <= 0) return; 
         const w = 24, h = 4;
         const x = e.x - w / 2, y = e.y - CONFIG.TILE_SIZE / 2 - 8;
         this.ctx.fillStyle = '#300';
@@ -547,7 +549,7 @@ export default class Renderer {
         this.ctx.quadraticCurveTo(-width / 2 + 2, startY + height / 3, 0, startY + 6);
         this.ctx.fill();
 
-        // [NEW] Better Damage Visuals (Smoke)
+        // Better Damage Visuals (Smoke)
         const hpPct = hp / maxHp;
         if (hpPct < 0.5) {
              const time = Date.now();
@@ -730,11 +732,19 @@ export default class Renderer {
         this.drawHealth(obj); 
     }
 
-    // [RESTORED]
     drawCharacter(obj, isPlayer, isEnemy = false) { 
+        const isDead = obj.hp <= 0;
+
+        this.ctx.save();
+        if (isDead) {
+            this.ctx.globalAlpha = 0.4;
+        }
+
         let colorShirt, colorPants, colorSkin;
 
-        if (isEnemy) {
+        if (isDead) {
+            colorShirt = '#555555'; colorPants = '#333333'; colorSkin = '#777777';
+        } else if (isEnemy) {
             colorShirt = '#000000'; colorPants = '#111111'; colorSkin = '#222222';
         } else {
             colorShirt = isPlayer ? '#3498db' : '#993333';
@@ -742,7 +752,7 @@ export default class Renderer {
             colorSkin = isPlayer ? '#ffcc99' : '#e0b090';
         }
 
-        const colorHelmet = isEnemy ? '#333' : '#8B6F43';
+        const colorHelmet = isEnemy ? '#333' : (isDead ? '#444' : '#8B6F43');
         const isMoving = obj.isMoving;
         const tick = isMoving ? (obj.moveTime * 0.015) : (Date.now() * 0.005);
         const bounceY = isMoving ? Math.abs(Math.sin(tick)) * 1.5 : Math.sin(tick) * 0.5;
@@ -783,7 +793,7 @@ export default class Renderer {
         this.ctx.fillRect(obj.x - (HEAD_SIZE / 2 + 1), HEAD_Y - 4, HEAD_SIZE + 2, 6);
         
         const heldId = obj.activeMelee;
-        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id)) {
+        if ((heldId === TILES.SWORD_WOOD.id || heldId === TILES.SWORD_IRON.id) && !isDead) {
             this.ctx.strokeStyle = heldId === TILES.SWORD_IRON.id ? '#aaa' : '#5C3317';
             this.ctx.lineWidth = 3;
             const handX = obj.x + 10;
@@ -800,12 +810,13 @@ export default class Renderer {
         if (dir.x > 0) { eyeX1 += 2; eyeX2 += 2; }
         if (dir.x < 0) { eyeX1 -= 2; eyeX2 -= 2; }
         
-        if (dir.y >= -0.1) {
+        if (dir.y >= -0.1 && !isDead) {
             this.ctx.fillStyle = isEnemy ? '#ff0000' : '#000000';
             this.ctx.fillRect(eyeX1, HEAD_Y + 4, 3, 3);
             this.ctx.fillRect(eyeX2, HEAD_Y + 4, 3, 3);
         }
         
+        this.ctx.restore(); 
         this.drawHealth(obj); 
     }
 
@@ -821,21 +832,16 @@ export default class Renderer {
         
         const toScreen = (wx, wy) => ({ x: (wx - this.game.camera.x) * this.game.zoom, y: (wy - this.game.camera.y) * this.game.zoom });
         
-        // [MODIFIED] Use pre-rendered light sprite for performance
         const drawLight = (wx, wy, radius) => {
             const pos = toScreen(wx, wy);
             const r = radius * this.game.zoom;
-            // Draw pre-rendered sprite instead of creating new gradient
             this.shadowCtx.drawImage(this.lightSprite, pos.x - r, pos.y - r, r * 2, r * 2);
         };
 
         drawLight(this.game.player.x, this.game.player.y, 150);
-        
-        // [NEW] Make peers glow
         Object.values(this.game.peers).forEach(p => {
              drawLight(p.x, p.y, 150);
         });
-
         this.game.boats.forEach(b => drawLight(b.x, b.y, 120));
         
         const startCol = Math.floor(this.game.camera.x / CONFIG.TILE_SIZE);
