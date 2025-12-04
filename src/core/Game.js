@@ -41,7 +41,7 @@ export default class Game {
         
         this.lastFrameTime = 0;
         this.regenTimer = 0;
-        this.godMode = false; // Kept false permanently
+        this.godMode = false;
         this.activeBlueprint = null;
         this.shootCooldown = 0;
 
@@ -105,18 +105,16 @@ export default class Game {
             this.renderer.resize();
             this.particles.initWind(this.canvas.width, this.canvas.height);
         });
-
-        // [MODIFIED] Removed God Mode ('G' key) listener
     }
 
-    // [OPTIMIZED] Spiral Search for safer, deterministic spawning
+    // [OPTIMIZED] Hybrid Spawn Strategy: Spiral (Center) -> Random (Global)
     findSafeSpawnPoint() {
-        // Start at 0,0 and spiral out looking for land
+        // 1. Spiral Search: Try to find land near 0,0 first
         let x = 0, y = 0;
         let dx = 0, dy = -1;
-        const maxSteps = 1000;
+        const maxSpiralSteps = 10000; // Increased radius significantly
         
-        for(let i=0; i<maxSteps; i++) {
+        for(let i=0; i<maxSpiralSteps; i++) {
             const gx = Math.floor(x);
             const gy = Math.floor(y);
             const id = this.world.getTile(gx, gy);
@@ -133,7 +131,20 @@ export default class Game {
             y += dy;
         }
         
-        // Fallback
+        // 2. Random Fallback: If spiral fails (huge ocean), just pick random spots
+        console.warn("Spiral spawn failed. Attempting global random search...");
+        for(let i=0; i<1000; i++) {
+            const rx = Math.floor((Math.random() - 0.5) * 2000); // Check +/- 1000 tiles
+            const ry = Math.floor((Math.random() - 0.5) * 2000);
+            const id = this.world.getTile(rx, ry);
+            const def = ID_TO_TILE[id];
+            
+            if (!def.solid && !def.isWater) {
+                return { x: rx * CONFIG.TILE_SIZE + 16, y: ry * CONFIG.TILE_SIZE + 16 };
+            }
+        }
+
+        // 3. Absolute Last Resort (Water Spawn - Should ideally never happen)
         return { x: 16, y: 16 };
     }
 
@@ -329,7 +340,7 @@ export default class Game {
                         }
                     }
                 } else {
-                    this.spawnText(mx, my, "TOO EXPENSIVE", "#f00");
+                    this.game.spawnText(mx, my, "TOO EXPENSIVE", "#f00");
                 }
             }
 
