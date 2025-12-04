@@ -27,4 +27,6 @@
 - replace player with tombstone when died with same properties as boulder
 - spawn boats 100 tiles away
 - rendering in the build menu
+- when host player is killed on water, boats get stuck
+
 

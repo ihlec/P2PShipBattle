@@ -133,8 +133,12 @@ export default class Game {
     }
 
     gameLoop(timestamp) {
-        const deltaTime = timestamp - this.lastFrameTime;
+        let deltaTime = timestamp - this.lastFrameTime;
         this.lastFrameTime = timestamp;
+
+        // [FIX] Cap delta time to prevent physics explosions on lag spikes/tab switching
+        if (deltaTime > 50) deltaTime = 50; 
+
         this.update(deltaTime);
         this.renderer.draw();
         requestAnimationFrame(t => this.gameLoop(t));
@@ -162,7 +166,6 @@ export default class Game {
     updatePlayer(deltaTime) {
         if (this.shootCooldown > 0) this.shootCooldown--;
 
-        // [MODIFIED] Added !this.player.inBoat check. Boats do not regenerate HP.
         if (!this.isRespawning && !this.player.inBoat && this.player.hp > 0 && this.player.hp < 100) {
             this.regenTimer += deltaTime;
             if (this.regenTimer > 2000) {
@@ -864,6 +867,17 @@ export default class Game {
             const dy = p.targetY - p.y;
             p.x += dx * 0.15;
             p.y += dy * 0.15;
+
+            // [FIX] Smooth rotation for peer boats
+            if (p.inBoat && p.boatStats) {
+                const lerpAngle = (start, end, amt) => {
+                    let diff = end - start;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    return start + diff * amt;
+                };
+                p.boatStats.heading = lerpAngle(p.boatStats.heading, p.boatStats.targetHeading, 0.1);
+            }
         });
     }
     

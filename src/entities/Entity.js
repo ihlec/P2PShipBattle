@@ -164,6 +164,11 @@ export class Entity {
 
         stats.speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.y ** 2) * PIXEL_SCALE;
         this.isMoving = stats.speed > 0.1;
+
+        // [NEW] Check for collisions with other entities (Ramming)
+        if (game && stats.speed > 1.0) { // Only ram if moving at decent speed
+            this.checkEntityRam(game);
+        }
     }
 
     move(deltaX, deltaY, world, game) {
@@ -219,7 +224,7 @@ export class Entity {
         }
         else {
              // Blocked
-             if (game && (this.type === 'boat' || this.type === 'npc')) {
+             if (game && (this.type === 'boat' || this.type === 'npc' || this.inBoat)) {
                  this.handleImpact(game, this.x + deltaX * 2.5, this.y + deltaY * 2.5);
              }
         }
@@ -233,8 +238,7 @@ export class Entity {
     handleImpact(game, targetX, targetY) {
         if (this.ramCooldown > 0) return;
         
-        // [FIX] Simplified to allow any Boat or NPC to ram
-        if (this.type !== 'npc' && this.type !== 'boat') return;
+        if (this.type !== 'npc' && this.type !== 'boat' && !this.inBoat) return;
 
         const gridX = Math.floor(targetX / CONFIG.TILE_SIZE);
         const gridY = Math.floor(targetY / CONFIG.TILE_SIZE);
@@ -247,6 +251,45 @@ export class Entity {
              this.velocity.x *= -0.5; // Bounce
              this.velocity.y *= -0.5;
              game.spawnParticles(this.x, this.y, '#fff', 5);
+        }
+    }
+
+    // [NEW] Logic to ram NPCs/Boats
+    checkEntityRam(game) {
+        if (this.ramCooldown > 0) return;
+
+        // Gather all potential targets
+        const targets = [...game.npcs, ...game.animals, ...game.boats, ...Object.values(game.peers)];
+        const RAM_RADIUS = 25;
+
+        for (const t of targets) {
+            // Don't hit yourself, or the player if you ARE the player
+            if (t === this) continue;
+            if (this.inBoat && t === game.player) continue;
+
+            const dist = Utils.distance(this, t);
+            
+            if (dist < RAM_RADIUS) {
+                // Determine damage based on config
+                let damage = 20; 
+                if (t.type === 'boat' || t.inBoat) damage = CONFIG.NPC_RAM.DAMAGE_BOAT; 
+                else damage = 40; // High damage to fleshy targets
+
+                // Apply Damage
+                game.applyDamageToEntity(t, damage);
+
+                // Effects & Physics
+                this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN; // Global cooldown
+                
+                // Bounce back
+                this.velocity.x *= -0.5;
+                this.velocity.y *= -0.5;
+                
+                game.spawnParticles(t.x, t.y, '#f00', 8);
+                game.spawnText(t.x, t.y, "RAM!", "#ff0000");
+
+                return; // Hit one target per frame max
+            }
         }
     }
 
