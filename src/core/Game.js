@@ -37,6 +37,7 @@ export default class Game {
 
         this.camera = { x: 0, y: 0 };
         this.zoom = 1;
+        this.shake = 0; // [NEW] Screen shake intensity
         
         this.lastFrameTime = 0;
         this.regenTimer = 0;
@@ -136,7 +137,6 @@ export default class Game {
         let deltaTime = timestamp - this.lastFrameTime;
         this.lastFrameTime = timestamp;
 
-        // [FIX] Cap delta time to prevent physics explosions on lag spikes/tab switching
         if (deltaTime > 50) deltaTime = 50; 
 
         this.update(deltaTime);
@@ -145,6 +145,10 @@ export default class Game {
     }
 
     update(deltaTime) {
+        // [NEW] Shake Decay
+        if (this.shake > 0) this.shake *= 0.9;
+        if (this.shake < 0.5) this.shake = 0;
+
         this.handleCameraZoom();
         this.network.update(deltaTime);
         this.world.update(deltaTime);
@@ -582,6 +586,7 @@ export default class Game {
                 
                 this.network.requestRemove(gx, gy, restoreId);
                 this.spawnParticles(tx, ty, tileDef.color, 10);
+                this.triggerShake(5); // [NEW] Shake on destruction
                 this.recalculateCannons();
             } else {
                 this.network.broadcastTileHit(gx, gy, damage);
@@ -671,6 +676,7 @@ export default class Game {
                 const proj = new Projectile(c.x, c.y - 20, target.x, target.y, c.damage, 10, '#000', true, 'cannonball');
                 this.projectiles.push(proj);
                 this.spawnParticles(c.x, c.y - 10, '#888', 3);
+                this.triggerShake(2); // [NEW] Shake on cannon fire
 
                 if (this.network.isHost) {
                     this.network.actions.sendCannon({ 
@@ -778,8 +784,19 @@ export default class Game {
 
     updateProjectiles() {
         this.projectiles.forEach(p => {
-            p.update();
+            const status = p.update();
             if (!p.active) return;
+
+            // [NEW] Water Splash
+            if (status === 'expired') {
+                 const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
+                 const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
+                 const tileId = this.world.getTile(gx, gy);
+                 if (tileId === TILES.WATER.id || tileId === TILES.DEEP_WATER.id) {
+                     this.spawnParticles(p.x, p.y, '#ffffff', 6);
+                 }
+                 return;
+            }
 
             const targets = [this.player, ...this.npcs, ...this.animals, ...this.boats, ...Object.values(this.peers)];
             
@@ -828,6 +845,7 @@ export default class Game {
         this.deathCount++;
         this.respawnTimer = 3000 + (this.deathCount * 2000);
         this.spawnParticles(this.player.x, this.player.y, '#f00', 30);
+        this.triggerShake(15); // [NEW] Big shake on death
         this.showMessage(`YOU DIED! RESPAWN IN ${Math.ceil(this.respawnTimer / 1000)}s`, "#f00");
     }
 
@@ -857,10 +875,23 @@ export default class Game {
         }
         const viewWidth = this.canvas.width / this.zoom;
         const viewHeight = this.canvas.height / this.zoom;
-        this.camera.x = this.player.x - viewWidth / 2;
-        this.camera.y = this.player.y - viewHeight / 2;
+        
+        // [NEW] Add Shake Offset
+        let shakeX = 0, shakeY = 0;
+        if (this.shake > 0) {
+            shakeX = (Math.random() - 0.5) * this.shake;
+            shakeY = (Math.random() - 0.5) * this.shake;
+        }
+
+        this.camera.x = this.player.x - viewWidth / 2 + shakeX;
+        this.camera.y = this.player.y - viewHeight / 2 + shakeY;
     }
     
+    // [NEW] Trigger Shake
+    triggerShake(amount) {
+        this.shake = Math.min(this.shake + amount, 20);
+    }
+
     updatePeers() { 
         Object.values(this.peers).forEach(p => {
             const dx = p.targetX - p.x;
@@ -868,7 +899,6 @@ export default class Game {
             p.x += dx * 0.15;
             p.y += dy * 0.15;
 
-            // [FIX] Smooth rotation for peer boats
             if (p.inBoat && p.boatStats) {
                 const lerpAngle = (start, end, amt) => {
                     let diff = end - start;

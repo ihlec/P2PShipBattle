@@ -47,7 +47,7 @@ export class Entity {
         this.activeRange = TILES.GREY.id;
         this.activeMelee = 'hand';
         this.ramCooldown = 0;
-        this.stunTimer = 0; // [NEW] Stun timer for collisions
+        this.stunTimer = 0;
     }
 
     handleInput(inputHandler, deltaTime, world, game) {
@@ -103,10 +103,10 @@ export class Entity {
         if (stats.cooldownLeft > 0) stats.cooldownLeft--;
         if (stats.cooldownRight > 0) stats.cooldownRight--;
         
-        // [NEW] Stun Logic
+        // Stun Logic
         if (this.stunTimer > 0) {
             this.stunTimer--;
-            input.up = false; // Disable acceleration
+            input.up = false; 
             input.down = false;
         }
 
@@ -257,7 +257,7 @@ export class Entity {
              this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN;
              this.velocity.x *= -0.5; // Bounce
              this.velocity.y *= -0.5;
-             this.stunTimer = 20; // [NEW] Stun
+             this.stunTimer = 20; 
              game.spawnParticles(this.x, this.y, '#fff', 5);
         }
     }
@@ -284,10 +284,11 @@ export class Entity {
                 this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN; 
                 this.velocity.x *= -0.5;
                 this.velocity.y *= -0.5;
-                this.stunTimer = 20; // [NEW] Stun
+                this.stunTimer = 20; 
                 
                 game.spawnParticles(t.x, t.y, '#f00', 8);
                 game.spawnText(t.x, t.y, "RAM!", "#ff0000");
+                game.triggerShake(10); // [NEW] Shake
 
                 return; 
             }
@@ -340,7 +341,6 @@ export class Entity {
             p.life = config.CANNON_RANGE; 
             game.projectiles.push(p);
 
-            // [FIX] Allow broadcasting from Enemy Ships as well as Players
             if (game.network) {
                  game.network.actions.sendShoot({
                     x: sx, y: sy,
@@ -354,5 +354,6 @@ export class Entity {
         
         // Recoil Effect
         game.spawnParticles(this.x, this.y, '#888', 8);
+        game.triggerShake(4); // [NEW] Shake
     }
 }
