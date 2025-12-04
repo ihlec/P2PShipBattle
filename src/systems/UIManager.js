@@ -59,13 +59,39 @@ export default class UIManager {
     }
 
     initMenus() {
+        // --- BLUEPRINT MENU ---
         this.dom.bpMenu.innerHTML = '';
         BLUEPRINTS.forEach((bp) => {
             const div = document.createElement('div');
             div.className = 'bp-item';
+            
+            // [NEW] Use Canvas to render exact game structure
+            const canvas = document.createElement('canvas');
+            canvas.width = 32;
+            canvas.height = 32;
+            // Scale slightly in CSS to fit menu
+            canvas.style.cssText = "width:30px; height:30px; margin:0 auto 5px auto; display:block;";
+            
+            const ctx = canvas.getContext('2d');
+            const mainId = bp.structure[0].id;
+            
+            this.renderIconToCanvas(ctx, mainId);
+
             let costStr = "Free";
             if (bp.cost) costStr = Object.entries(bp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
-            div.innerHTML = `<div class="bp-name">${bp.name}</div><div class="bp-req">${costStr}</div>`;
+            
+            div.appendChild(canvas);
+            
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'bp-name';
+            nameDiv.innerText = bp.name;
+            div.appendChild(nameDiv);
+
+            const costDiv = document.createElement('div');
+            costDiv.className = 'bp-req';
+            costDiv.innerText = costStr;
+            div.appendChild(costDiv);
+
             div.onclick = () => { 
                 if (div.classList.contains('disabled')) return;
                 this.game.activeBlueprint = bp; 
@@ -76,13 +102,23 @@ export default class UIManager {
             this.dom.bpMenu.appendChild(div);
         });
 
+        // --- WEAPON MENU ---
         this.dom.wpnMenu.innerHTML = '';
         Object.values(WEAPONS).forEach((wp) => {
             const div = document.createElement('div');
             div.className = 'bp-item';
             div.id = `wp-btn-${wp.id}`;
+            
+            let iconHtml = '';
+            if (wp.id === TILES.SPEAR_WOOD.id) iconHtml = `<div class="icon-spear tip-black" style="margin:0 auto 5px auto; transform:rotate(45deg) scale(1.5);"></div>`;
+            else if (wp.id === TILES.SPEAR_IRON.id) iconHtml = `<div class="icon-spear tip-grey" style="margin:0 auto 5px auto; transform:rotate(45deg) scale(1.5);"></div>`;
+            else if (wp.id === TILES.SWORD_WOOD.id) iconHtml = `<div class="icon-sword-css blade-black" style="margin:0 auto 5px auto; transform:scale(1.5);"></div>`;
+            else if (wp.id === TILES.SWORD_IRON.id) iconHtml = `<div class="icon-sword-css blade-grey" style="margin:0 auto 5px auto; transform:scale(1.5);"></div>`;
+            else iconHtml = `<div style="width:20px; height:20px; background:${wp.color}; margin:0 auto 5px auto;"></div>`;
+
             let costStr = Object.entries(wp.cost).map(([id, qty]) => `${qty} ${ID_TO_TILE[id].short}`).join(', ');
-            div.innerHTML = `<div class="bp-name">${wp.name}</div><div class="bp-req">${costStr}</div>`;
+            
+            div.innerHTML = `${iconHtml}<div class="bp-name">${wp.name}</div><div class="bp-req">${costStr}</div>`;
             div.onclick = () => {
                 if (div.classList.contains('disabled')) return;
                 if (wp.type === 'melee' && this.game.player.inventory[wp.id] > 0) {
@@ -99,6 +135,118 @@ export default class UIManager {
             };
             this.dom.wpnMenu.appendChild(div);
         });
+    }
+
+    // [NEW] Helper to render structures exactly as they appear in game
+    renderIconToCanvas(ctx, id) {
+        const tile = ID_TO_TILE[id];
+        const ts = 32;
+
+        if (tile.isTower) {
+            // Draw Tower Logic (Ported from Renderer)
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, ts, ts); // Background shadow
+            
+            ctx.fillStyle = tile.color;
+            ctx.fillRect(0, 4, ts, ts); // Main body shifted down slightly for icon
+            
+            // Details
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            ctx.fillRect(4, 12, ts - 8, 2);
+            ctx.fillRect(4, 24, ts - 8, 2);
+            
+            ctx.fillStyle = '#111';
+            ctx.fillRect(ts / 2 - 2, 14, 4, 12); // Slit
+            
+            // Top Turret
+            const topY = -8 + 4; // Shifted
+            ctx.fillStyle = (id === TILES.TOWER_BASE_GOLD.id ? '#FDD835' : (id === TILES.TOWER_BASE_IRON.id ? '#555' : '#888'));
+            ctx.fillRect(-2, topY, ts + 4, ts); 
+            
+            // Battlements
+            ctx.fillStyle = tile.color;
+            ctx.fillRect(0, topY - 4, 6, 6);
+            ctx.fillRect(ts - 6, topY - 4, 6, 6);
+            
+            // Center the view for the icon
+            return;
+        }
+
+        if (id === TILES.WALL.id) {
+            ctx.fillStyle = '#444';
+            ctx.fillRect(0, 0, ts, ts);
+            ctx.fillStyle = tile.color;
+            ctx.fillRect(2, 2, 12, 8);
+            ctx.fillRect(16, 2, 14, 8);
+            ctx.fillRect(2, 12, 8, 8);
+            ctx.fillRect(12, 12, 18, 8);
+            ctx.fillRect(2, 22, 18, 8);
+            ctx.fillRect(22, 22, 8, 8);
+            return;
+        }
+
+        if (id === TILES.WOOD_WALL.id || id === TILES.WOOD_WALL_OPEN.id) {
+            ctx.fillStyle = '#5C3317';
+            // Closed Fence Look
+            ctx.fillRect(4, 4, 6, ts - 4);
+            ctx.fillRect(22, 4, 6, ts - 4);
+            ctx.fillRect(0, 8, ts, 4);
+            ctx.fillRect(0, 20, ts, 4);
+            ctx.fillStyle = '#3E2723';
+            ctx.fillRect(3, 2, 8, 2);
+            ctx.fillRect(21, 2, 8, 2);
+            return;
+        }
+
+        if (id === TILES.ROAD.id) {
+            ctx.fillStyle = '#4a4a4a'; 
+            ctx.fillRect(0, 0, ts, ts);
+            // Simple cobblestone pattern
+            ctx.fillStyle = '#555';
+            ctx.fillRect(2, 2, 12, 12);
+            ctx.fillRect(16, 2, 12, 12);
+            ctx.fillRect(2, 16, 12, 12);
+            ctx.fillRect(16, 16, 12, 12);
+            return;
+        }
+
+        if (id === TILES.BOAT.id) {
+            // Simplified Boat Top-Down
+            ctx.fillStyle = '#5D4037';
+            ctx.beginPath();
+            ctx.ellipse(16, 16, 8, 14, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#3E2723'; // Mast
+            ctx.beginPath();
+            ctx.arc(16, 16, 3, 0, Math.PI*2);
+            ctx.fill();
+            // Sail
+            ctx.fillStyle = '#eee';
+            ctx.fillRect(8, 14, 16, 4);
+            return;
+        }
+
+        if (id === TILES.TORCH.id) {
+             ctx.fillStyle = '#222'; // Floor background
+             ctx.fillRect(0,0,32,32);
+             
+             ctx.fillStyle = '#555';
+             ctx.fillRect(14, 10, 4, 12); 
+             ctx.fillStyle = '#ffaa00';
+             ctx.beginPath();
+             ctx.arc(16, 8, 6, 0, Math.PI*2);
+             ctx.fill();
+             return;
+        }
+
+        // Default Block (Bridge, etc)
+        ctx.fillStyle = tile.color;
+        ctx.fillRect(0, 0, ts, ts);
+        
+        // Add a border to make it look like a block
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, 0, ts, ts);
     }
 
     toggleBlueprints() { 
@@ -453,7 +601,7 @@ export default class UIManager {
             if (!p) return; 
             const px = Math.floor(p.x / CONFIG.TILE_SIZE);
             const py = Math.floor(p.y / CONFIG.TILE_SIZE);
-            for (let y = py - range; y < py + range; y++) {c
+            for (let y = py - range; y < py + range; y++) {
                 for (let x = px - range; x < px + range; x++) {
                     const key = `${x},${y}`;
                     if (activeCannons.has(key)) continue;

@@ -41,7 +41,7 @@ export default class Game {
         
         this.lastFrameTime = 0;
         this.regenTimer = 0;
-        this.godMode = false;
+        this.godMode = false; // Kept false permanently
         this.activeBlueprint = null;
         this.shootCooldown = 0;
 
@@ -106,15 +106,7 @@ export default class Game {
             this.particles.initWind(this.canvas.width, this.canvas.height);
         });
 
-        window.addEventListener('keyup', (e) => {
-            if (e.target.tagName === 'INPUT') return;
-
-            if (e.key.toLowerCase() === 'g') {
-                this.godMode = !this.godMode;
-                this.showMessage(this.godMode ? "GOD MODE ON" : "GOD MODE OFF");
-                this.ui.update();
-            }
-        });
+        // [MODIFIED] Removed God Mode ('G' key) listener
     }
 
     // [OPTIMIZED] Spiral Search for safer, deterministic spawning
@@ -165,7 +157,7 @@ export default class Game {
         this.world.update(deltaTime);
         this.particles.update(this.canvas.width, this.canvas.height, this.world.wind.angle, this.camera, this.zoom);
         
-        this.updatePeers(deltaTime); // [FIX] Pass deltaTime
+        this.updatePeers(deltaTime); 
         this.updatePlayer(deltaTime); 
         this.updateEntities(deltaTime);
         this.updateProjectiles();
