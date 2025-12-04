@@ -275,16 +275,6 @@ export default class UIManager {
                         if (!this.game.godMode) for (let [id, qty] of Object.entries(costMap)) this.game.player.inventory[id] -= qty;
                         
                         if (this.game.network.isHost) {
-                             // Use class from Game scope or imported boat if needed, assuming Game handles it or importing Boat here?
-                             // Better to let Game handle spawn.
-                             // For now we assume Game imports Boat.
-                             // Actually we need to make sure we spawn a boat.
-                             // We can use a custom event or method on game.
-                             // But since we are in UIManager, we need to be careful with imports.
-                             // Let's defer to game.network logic or game spawn method.
-                             // We'll push a generic object and let sync handle it or import Boat if we can.
-                             // Assuming Boat is imported in Game.js, we can't 'new Boat' here easily without circular deps or import.
-                             // SOLUTION: We will let Game.js handle the actual instantiation via a helper.
                              this.game.spawnBoat(gx*32+16, gy*32+16);
                         } else {
                              this.game.network.actions.sendEntReq({ act: 'spawnBoat', x: gx*32+16, y: gy*32+16 });
@@ -308,9 +298,10 @@ export default class UIManager {
 
         } else if (this.game.input.mouse.clickedRight) {
             
-            // Cancel Blueprint
-            if (this.game.activeBlueprint) {
+            // Cancel Blueprint OR Deselect Tile
+            if (this.game.activeBlueprint || this.game.player.selectedTile) {
                 this.game.activeBlueprint = null;
+                this.game.player.selectedTile = null;
                 this.update();
                 return;
             }
@@ -347,7 +338,7 @@ export default class UIManager {
                 }
             }
 
-            // [FIXED] Shear Sheep
+            // Shear Sheep
             const clickedSheep = this.game.animals.find(s => Utils.distance(s, { x: mx, y: my }) < 24);
             if (clickedSheep && clickedSheep.hasWool) {
                 if (this.game.network.isHost) {
@@ -365,7 +356,13 @@ export default class UIManager {
             const tileId = this.game.world.getTile(gx, gy);
             const tileDef = ID_TO_TILE[tileId];
             
-            if (tileId === TILES.TREE.id || tileDef.hp || [TILES.GREY.id, TILES.WOOD.id, TILES.WOOD_RAIL.id].includes(tileId)) {
+            // Allow removing these tiles even if they don't have HP
+            const destructible = [
+                TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, 
+                TILES.WOOD.id, TILES.WOOD_RAIL.id
+            ];
+
+            if (tileId === TILES.TREE.id || tileDef.hp || destructible.includes(tileId)) {
                 this.applyDamageToTile(gx, gy, 20); 
             }
         }
@@ -391,11 +388,16 @@ export default class UIManager {
         const tileId = this.game.world.getTile(gx, gy);
         const tileDef = ID_TO_TILE[tileId];
 
-        if (!tileDef || (!tileDef.hp && tileId !== TILES.TREE.id)) return;
+        // List of tiles that can be removed/destroyed even without HP
+        const destructible = [
+            TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, 
+            TILES.WOOD.id, TILES.WOOD_RAIL.id
+        ];
+
+        if (!tileDef || (!tileDef.hp && tileId !== TILES.TREE.id && !destructible.includes(tileId))) return;
         
         if (tileId === TILES.TREE.id) {
              this.game.network.requestRemove(gx, gy, TILES.GRASS.id);
-             // [FIXED] Pass 'tree' type to spawnLoot
              this.spawnLoot(gx * CONFIG.TILE_SIZE + 16, gy * CONFIG.TILE_SIZE + 16, 'tree');
              this.game.spawnParticles(gx * CONFIG.TILE_SIZE + 16, gy * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
              return;
@@ -410,7 +412,15 @@ export default class UIManager {
             this.game.spawnParticles(tx, ty, '#777', 3);
             this.game.spawnText(tx, ty, `-${damage}`, '#fff');
             
-            if (totalDmg >= tileDef.hp) {
+            let destroyed = false;
+            if (tileDef.hp) {
+                if (totalDmg >= tileDef.hp) destroyed = true;
+            } else if (destructible.includes(tileId)) {
+                // Instantly destroy floor tiles
+                destroyed = true;
+            }
+
+            if (destroyed) {
                 const biome = Utils.getBiome(gx, gy, this.game.world.seed);
                 let restoreId = TILES.GRASS.id;
                 if (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) restoreId = biome;
@@ -443,7 +453,7 @@ export default class UIManager {
             if (!p) return; 
             const px = Math.floor(p.x / CONFIG.TILE_SIZE);
             const py = Math.floor(p.y / CONFIG.TILE_SIZE);
-            for (let y = py - range; y < py + range; y++) {
+            for (let y = py - range; y < py + range; y++) {c
                 for (let x = px - range; x < px + range; x++) {
                     const key = `${x},${y}`;
                     if (activeCannons.has(key)) continue;

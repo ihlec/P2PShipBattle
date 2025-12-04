@@ -63,11 +63,12 @@ export class Raider extends Entity {
     updateAI(deltaTime, player, world, game) {
         if (this.attackCooldown > 0) this.attackCooldown--;
 
-        // 1. Target Acquisition (Every ~1 second)
+        // 1. Target Acquisition
+        // [MODIFIED] Reduced timer from 60 to 10 to ensure they "always" switch to the closest target quickly
         this.searchTimer--;
         if (this.searchTimer <= 0 || (this.target && this.target.obj.hp <= 0)) {
             this.target = this.findTarget(game, world);
-            this.searchTimer = 60;
+            this.searchTimer = 10; 
         }
 
         if (this.target) {
@@ -79,7 +80,8 @@ export class Raider extends Entity {
             const dist = Math.sqrt((tx - this.x)**2 + (ty - this.y)**2);
 
             // 2. Attack
-            if (dist < 40) {
+            // [FIXED] Reduced attack range from 40 to 28 (Touching distance)
+            if (dist < 28) {
                 if (this.attackCooldown <= 0) {
                     this.performAttack(game, this.target);
                     this.attackCooldown = 60;
@@ -133,7 +135,6 @@ export class Raider extends Entity {
                         if (d < minDst) {
                             minDst = d;
                             // For tiles, obj needs x/y or special handling. 
-                            // We'll construct a mock object or handle logic in updateAI
                             closest = { type: 'structure', obj: { x: x * 32 + 16, y: y * 32 + 16, hp: 1 }, x: x, y: y }; 
                         }
                     }
@@ -145,7 +146,8 @@ export class Raider extends Entity {
     }
 
     performAttack(game, target) {
-        game.spawnParticles(this.x + (Math.random()-0.5)*20, this.y + (Math.random()-0.5)*20, '#fff', 3);
+        // [MODIFIED] Added offset to particles so they appear "between" combatants
+        game.spawnParticles(this.x + (Math.random()-0.5)*10, this.y + (Math.random()-0.5)*10, '#fff', 3);
         
         if (target.type === 'player') {
             const p = target.obj;

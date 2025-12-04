@@ -1,11 +1,13 @@
 export class Projectile {
-    constructor(x, y, targetX, targetY, damage, speed, color, isPlayerOwner, type = 'stone') {
+    // [FIX] Added ownerId to constructor to track specific shooter identity
+    constructor(x, y, targetX, targetY, damage, speed, color, isPlayerOwner, type = 'stone', ownerId = null) {
         this.x = x; 
         this.y = y;
         this.damage = damage;
         this.color = color;
         this.active = true;
-        this.owner = isPlayerOwner ? 'player' : 'enemy';
+        this.owner = isPlayerOwner ? 'player' : 'enemy'; // General team tag
+        this.ownerId = ownerId; // Specific entity ID (for self-damage prevention)
         this.life = 100;
         this.type = type;
         this.angle = Math.atan2(targetY - y, targetX - x);

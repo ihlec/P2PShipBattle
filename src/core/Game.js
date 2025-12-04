@@ -106,6 +106,8 @@ export default class Game {
         });
 
         window.addEventListener('keyup', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+
             if (e.key.toLowerCase() === 'g') {
                 this.godMode = !this.godMode;
                 this.showMessage(this.godMode ? "GOD MODE ON" : "GOD MODE OFF");
@@ -148,6 +150,7 @@ export default class Game {
         this.updatePlayer(deltaTime); 
         this.updateEntities(deltaTime);
         this.updateProjectiles();
+        this.updateCannons(deltaTime); 
         this.updateHostAI(deltaTime); 
         this.updateLoot(); 
 
@@ -159,7 +162,8 @@ export default class Game {
     updatePlayer(deltaTime) {
         if (this.shootCooldown > 0) this.shootCooldown--;
 
-        if (!this.isRespawning && this.player.hp > 0 && this.player.hp < 100) {
+        // [MODIFIED] Added !this.player.inBoat check. Boats do not regenerate HP.
+        if (!this.isRespawning && !this.player.inBoat && this.player.hp > 0 && this.player.hp < 100) {
             this.regenTimer += deltaTime;
             if (this.regenTimer > 2000) {
                 this.player.hp = Math.min(100, this.player.hp + 5);
@@ -207,6 +211,16 @@ export default class Game {
         });
     }
 
+    isTileOccupied(tx, ty) {
+        const tileRect = { l: tx * 32, r: (tx+1) * 32, t: ty * 32, b: (ty+1) * 32 };
+        
+        const all = [this.player, ...this.npcs, ...this.animals, ...this.boats, ...Object.values(this.peers)].filter(e => e.hp > 0);
+        
+        return all.some(e => {
+            return (e.x-10 < tileRect.r && e.x+10 > tileRect.l && e.y-10 < tileRect.b && e.y+10 > tileRect.t);
+        });
+    }
+
     handleInteraction() {
         if (!this.input.mouse.clickedLeft && !this.input.mouse.clickedRight) return;
         
@@ -217,45 +231,41 @@ export default class Game {
         
         if (Utils.distance(this.player, { x: mx, y: my }) > CONFIG.BUILD_RANGE) return;
 
-        const isOccupied = (tx, ty) => {
-            const tileRect = { l: tx * 32, r: (tx+1) * 32, t: ty * 32, b: (ty+1) * 32 };
-            const all = [this.player, ...this.npcs, ...this.animals, ...this.boats, ...Object.values(this.peers)];
-            return all.some(e => {
-                return (e.x-8 < tileRect.r && e.x+8 > tileRect.l && e.y-8 < tileRect.b && e.y+8 > tileRect.t);
-            });
-        };
-
         if (this.input.mouse.clickedLeft) {
             const clickedTile = this.world.getTile(gx, gy);
             const cannon = this.cannons.find(c => { const [cx, cy] = c.key.split(',').map(Number); return gx === cx && gy === cy; });
             
-            if (cannon && this.player.selectedTile === TILES.IRON.id) {
-                if (this.player.inventory[TILES.IRON.id] > 0 || this.godMode) {
-                    if (!this.godMode) this.player.inventory[TILES.IRON.id]--;
-                    if (this.network.isHost) {
-                        cannon.ammo += 5;
-                        this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
-                    } else {
-                        this.network.actions.sendEntReq({ id: cannon.key, act: 'refill' });
+            if (cannon) {
+                let requiredId = null;
+                if (clickedTile === TILES.TOWER_BASE_STONE.id) requiredId = TILES.GREY.id;
+                else if (clickedTile === TILES.TOWER_BASE_IRON.id) requiredId = TILES.IRON.id;
+                else if (clickedTile === TILES.TOWER_BASE_GOLD.id) requiredId = TILES.GOLD.id;
+
+                if (requiredId && this.player.selectedTile === requiredId) {
+                    if (this.player.inventory[requiredId] > 0 || this.godMode) {
+                        if (!this.godMode) this.player.inventory[requiredId]--;
+                        if (this.network.isHost) {
+                            cannon.ammo += 5;
+                            this.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
+                            this.network.actions.sendCannon({ key: cannon.key, act: 'upd', ammo: cannon.ammo });
+                        } else {
+                            this.network.actions.sendEntReq({ id: cannon.key, act: 'refill' });
+                        }
+                        return;
                     }
-                    return;
                 }
             }
             
             if (!this.activeBlueprint) {
-                // Gate Logic
                 if ((clickedTile === TILES.WOOD_WALL.id || clickedTile === TILES.WOOD_WALL_OPEN.id) && 
                     Utils.distance(this.player, {x: mx, y: my}) < 120) {
-                    
                     const newId = (clickedTile === TILES.WOOD_WALL.id) ? TILES.WOOD_WALL_OPEN.id : TILES.WOOD_WALL.id;
-                    
                     if (this.network.isHost) {
                         this.world.setTile(gx, gy, newId);
                         this.network.broadcastBuild(gx, gy, newId);
                     } else {
                         this.network.requestBuild(gx, gy, newId);
                     }
-                    // Prevent shooting when opening a gate
                     return;
                 }
 
@@ -265,7 +275,12 @@ export default class Game {
                     return;
                 }
                 const tileDef = ID_TO_TILE[sel];
-                if (tileDef.solid && isOccupied(gx, gy)) { this.spawnText(mx, my, "BLOCKED", "#f00"); return; }
+                
+                if (tileDef.solid && this.isTileOccupied(gx, gy)) { 
+                    this.spawnText(mx, my, "BLOCKED", "#f00"); 
+                    return; 
+                }
+
                 if (this.tryBuild(gx, gy, sel)) {
                     if (!this.godMode) this.player.inventory[sel]--;
                     this.recalculateCannons();
@@ -310,8 +325,9 @@ export default class Game {
 
         } else if (this.input.mouse.clickedRight) {
             
-            if (this.activeBlueprint) {
+            if (this.activeBlueprint || this.player.selectedTile) {
                 this.activeBlueprint = null;
+                this.player.selectedTile = null;
                 this.ui.update();
                 return;
             }
@@ -369,9 +385,9 @@ export default class Game {
             // Remove/Attack Tile
             const tileId = this.world.getTile(gx, gy);
             const tileDef = ID_TO_TILE[tileId];
-            
-            // Simplified check: Directly target the clicked tile
-            if (tileId === TILES.TREE.id || (tileDef && tileDef.hp) || [TILES.GREY.id, TILES.WOOD.id, TILES.WOOD_RAIL.id].includes(tileId)) {
+            const destructible = [TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, TILES.WOOD.id, TILES.WOOD_RAIL.id];
+
+            if (tileId === TILES.TREE.id || (tileDef && tileDef.hp) || destructible.includes(tileId)) {
                 this.applyDamageToTile(gx, gy, 20); 
             }
         }
@@ -384,6 +400,18 @@ export default class Game {
         }
 
         const current = this.world.getTile(gx, gy);
+        
+        const baseTerrains = [TILES.GRASS.id, TILES.SAND.id, TILES.WATER.id, TILES.DEEP_WATER.id];
+        
+        if (!baseTerrains.includes(current) && !allowRailOverwrite && current !== id) {
+            return false;
+        }
+
+        const targetDef = ID_TO_TILE[id];
+        if (targetDef.solid && this.isTileOccupied(gx, gy)) {
+            return false;
+        }
+
         if (current === id) return false;
         
         if ((current === TILES.WATER.id || current === TILES.DEEP_WATER.id) && !isBridge) return false;
@@ -408,17 +436,24 @@ export default class Game {
 
         if (!this.godMode) this.player.inventory[weaponId]--;
         
-        const proj = new Projectile(this.player.x, this.player.y - 10, tx, ty, damage, speed, color, true, type);
+        const proj = new Projectile(this.player.x, this.player.y - 10, tx, ty, damage, speed, color, true, type, this.player.id);
         proj.life = range;
         this.projectiles.push(proj);
         this.shootCooldown = 30;
+        
+        this.network.actions.sendShoot({
+            x: this.player.x, y: this.player.y - 10,
+            tx: tx, ty: ty,
+            dmg: damage, spd: speed,
+            col: color, type: type,
+            life: range
+        });
         
         if (type === 'stone') this.spawnParticles(this.player.x, this.player.y, '#aaa', 3);
         this.ui.update();
     }
 
     updateMeleeCombat() {
-        // Reverting to original condition + cooldown check
         if ((!this.player.isMoving && this.player.activeMelee === 'hand') || this.shootCooldown > 0) return;
 
         let dmg = 0;
@@ -428,7 +463,6 @@ export default class Game {
         else if (meleeId === 'hand') dmg = 5; 
         if (dmg === 0) return;
 
-        // 1. Check Entities (NPCs, Animals)
         const targets = [...this.npcs, ...this.animals];
         for (const t of targets) {
             if (Utils.distance(this.player, t) < CONFIG.TILE_SIZE + 10) {
@@ -437,20 +471,15 @@ export default class Game {
                 return;
             }
         }
-
-        // 2. Check Trees (Melee) - REMOVED
-        // Melee attacks no longer damage trees or boulders.
     }
 
     spawnLoot(x, y, type) {
         let dropId = TILES.GREY.id;
         let qty = 1;
         
-        // Fix: Properly handle tree drops
         if (type === 'sheep') { 
             dropId = TILES.WOOL.id; qty = 2; 
         } else if (type === 'tree' || type === TILES.TREE.id) {
-            // Chance for Greens
             if (Math.random() < 0.2) {
                 dropId = TILES.GREENS.id; 
                 qty = 1;
@@ -458,13 +487,34 @@ export default class Game {
                 dropId = TILES.WOOD.id; 
                 qty = 3;
             }
+        } else if (typeof type === 'number') {
+            dropId = type;
+            qty = 1;
+            
+            if (type === TILES.WALL.id) { dropId = TILES.GREY.id; qty = 1; }
+            else if (type === TILES.WOOD_WALL.id || type === TILES.WOOD_WALL_OPEN.id) { dropId = TILES.WOOD.id; qty = 1; }
+            else if (type === TILES.ROAD.id) { dropId = TILES.GREY.id; qty = 1; }
+            else if (type === TILES.TORCH.id) { dropId = TILES.BLACK.id; qty = 1; }
+            else if (type === TILES.WOOD_RAIL.id) { dropId = TILES.WOOD.id; qty = 1; }
+            else if (type === TILES.TOWER_BASE_STONE.id) { dropId = TILES.GREY.id; qty = 2; }
+            else if (type === TILES.TOWER_BASE_IRON.id) { dropId = TILES.IRON.id; qty = 2; }
+            else if (type === TILES.TOWER_BASE_GOLD.id) { dropId = TILES.GOLD.id; qty = 2; }
+            else if (type === TILES.MOUNTAIN.id) { 
+                if (Math.random() < 0.2) {
+                    dropId = TILES.IRON.id;
+                } else {
+                    dropId = TILES.GREY.id; 
+                }
+                qty = 1; 
+            }
         }
         
-        this.loot.push({ 
+        const newLoot = { 
             uid: Math.random().toString(36).substr(2, 9), 
             x: x, y: y, id: dropId, qty: qty, 
             bob: Math.random() * 100 
-        });
+        };
+        this.loot.push(newLoot);
     }
 
     applyDamageToEntity(entity, damage, isProjectile) {
@@ -490,10 +540,18 @@ export default class Game {
         const tileId = this.world.getTile(gx, gy);
         const tileDef = ID_TO_TILE[tileId];
 
-        if (!tileDef || (!tileDef.hp && tileId !== TILES.TREE.id)) return;
+        const destructible = [
+            TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, 
+            TILES.WOOD.id, TILES.WOOD_RAIL.id
+        ];
+
+        if (!tileDef || (!tileDef.hp && tileId !== TILES.TREE.id && !destructible.includes(tileId))) return;
         
-        // Removed explicit "instant-kill" block for trees. 
-        // Trees now rely on tileDef.hp just like walls and boulders.
+        if (tileId === TILES.TREE.id) {
+             this.network.requestRemove(gx, gy, TILES.GRASS.id);
+             this.spawnParticles(gx * CONFIG.TILE_SIZE + 16, gy * CONFIG.TILE_SIZE + 16, TILES.WOOD.color, 8);
+             return;
+        }
 
         const tx = gx * CONFIG.TILE_SIZE + 16;
         const ty = gy * CONFIG.TILE_SIZE + 16;
@@ -501,23 +559,25 @@ export default class Game {
         if (this.network.isHost) {
             const totalDmg = this.world.hitTile(gx, gy, damage);
             
-            // Use tile color for particles to support trees (brown) and stone (grey)
             this.spawnParticles(tx, ty, tileDef.color, 3);
             this.spawnText(tx, ty, `-${damage}`, '#fff');
             
-            // Note: Trees now have 40 HP defined in config.js, so this logic works naturally.
-            // Boulders have 80 HP.
-            if (totalDmg >= tileDef.hp) {
+            let destroyed = false;
+            if (tileDef.hp) {
+                if (totalDmg >= tileDef.hp) destroyed = true;
+            } else if (destructible.includes(tileId)) {
+                destroyed = true;
+            } else if (tileId === TILES.TREE.id) {
+                if (totalDmg >= tileDef.hp) destroyed = true;
+            }
+
+            if (destroyed) {
                 const biome = Utils.getBiome(gx, gy, this.world.seed);
                 let restoreId = TILES.GRASS.id;
                 if (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id) restoreId = biome;
                 if (biome === TILES.SAND.id) restoreId = TILES.SAND.id;
                 
                 this.network.requestRemove(gx, gy, restoreId);
-                // Tree Loot drop happens here now
-                if (tileId === TILES.TREE.id) {
-                    this.spawnLoot(tx, ty, 'tree');
-                }
                 this.spawnParticles(tx, ty, tileDef.color, 10);
                 this.recalculateCannons();
             } else {
@@ -540,6 +600,12 @@ export default class Game {
         if (!this.player) return;
 
         const range = 30;
+        
+        const oldCannons = new Map();
+        if (this.cannons) {
+            this.cannons.forEach(c => oldCannons.set(c.key, c));
+        }
+
         const activeCannons = new Map();
         const viewers = [this.player, ...Object.values(this.peers)];
 
@@ -554,7 +620,19 @@ export default class Game {
                     const id = this.world.getTile(x, y);
                     const tile = ID_TO_TILE[id];
                     if (tile && tile.isTower) {
-                         activeCannons.set(key, { key, x: x*32+16, y: y*32+16, damage: tile.cannonDamage||20, cooldown: 0, ammo: 10, range: 300 });
+                         const existing = oldCannons.get(key);
+                         const ammo = existing ? existing.ammo : 10;
+                         const cooldown = existing ? existing.cooldown : 0;
+                         
+                         activeCannons.set(key, { 
+                             key, 
+                             x: x*32+16, 
+                             y: y*32+16, 
+                             damage: tile.cannonDamage||20, 
+                             cooldown: cooldown, 
+                             ammo: ammo, 
+                             range: 300 
+                         });
                     }
                 }
             }
@@ -562,10 +640,51 @@ export default class Game {
         this.cannons = Array.from(activeCannons.values());
     }
 
+    updateCannons(dt) {
+        this.cannons.forEach(c => {
+            if (c.cooldown > 0) c.cooldown--;
+            if (c.ammo <= 0) return;
+
+            let target = null;
+            let minDst = c.range;
+            
+            const enemyBoats = this.boats.filter(b => b.owner === 'enemy');
+            const targets = [...this.npcs, ...enemyBoats]; 
+
+            targets.forEach(t => {
+                if (t.hp > 0) {
+                    const d = Math.sqrt((t.x - c.x)**2 + (t.y - c.y)**2);
+                    if (d < minDst) {
+                        minDst = d;
+                        target = t;
+                    }
+                }
+            });
+
+            if (target && c.cooldown <= 0) {
+                c.ammo--;
+                c.cooldown = 60; 
+                
+                const proj = new Projectile(c.x, c.y - 20, target.x, target.y, c.damage, 10, '#000', true, 'cannonball');
+                this.projectiles.push(proj);
+                this.spawnParticles(c.x, c.y - 10, '#888', 3);
+
+                if (this.network.isHost) {
+                    this.network.actions.sendCannon({ 
+                        key: c.key, 
+                        act: 'shoot', 
+                        ammo: c.ammo, 
+                        tx: target.x, 
+                        ty: target.y 
+                    });
+                }
+            }
+        });
+    }
+
     updateHostAI(dt) {
          if (!this.network.isHost) return;
 
-         // 1. Spawning Animals (Sheep)
          if (this.animals.length < 10 && Math.random() < 0.005) {
             const ang = Math.random() * 6.28;
             const dist = 600;
@@ -581,28 +700,22 @@ export default class Game {
             }
          }
 
-         // 2. Animal AI
          this.animals.forEach(s => {
             s.updateAI(dt, this.player, this.world, this);
             if (s.isMoving) s.moveTime += dt;
          });
 
-         // 3. NPC/Enemy Logic
          this.npcs.forEach(npc => {
             if (npc.updateAI) {
                 npc.updateAI(dt, this.player, this.world, this);
             } else {
-                // Fallback for simple entities if any
                 if (!npc.aiState) npc.aiState = { mode: 'chase', tx: 0, ty: 0, timer: 0, target: null };
-                // ... (Existing fallback logic if needed, but Raider handles itself) ...
             }
             if (npc.isMoving) npc.moveTime += dt;
          });
 
-         // 4. Enemy Boat Spawning
-         // Use the new createInvasionForce logic
          const boatCount = this.boats.filter(b => b.owner === 'enemy').length;
-         if (boatCount < 2 && Math.random() < 0.001) { // 0.1% chance per frame to attempt spawn
+         if (boatCount < 2 && Math.random() < 0.001) { 
              const enemyBoat = Boat.createInvasionForce(this);
              if (enemyBoat) {
                  this.boats.push(enemyBoat);
@@ -610,7 +723,6 @@ export default class Game {
              }
          }
 
-         // 5. Boat AI
          this.boats.forEach(b => {
              if (b.owner === 'enemy') {
                  b.updateAI(dt, this.player, this.world, this);
@@ -666,11 +778,11 @@ export default class Game {
             p.update();
             if (!p.active) return;
 
-            // 1. Check Entities
-            const targets = [...this.npcs, ...this.animals, ...this.boats, ...Object.values(this.peers)];
+            const targets = [this.player, ...this.npcs, ...this.animals, ...this.boats, ...Object.values(this.peers)];
+            
             for (const t of targets) {
-                // Don't hit self or owner if possible (simplified here)
                 if (p.owner === 'player' && t === this.player) continue;
+                if (p.ownerId && p.ownerId === t.id) continue;
                 
                 if (Utils.distance(p, t) < 20) {
                     this.applyDamageToEntity(t, p.damage);
@@ -679,13 +791,11 @@ export default class Game {
                 }
             }
 
-            // 2. Check Tiles
             const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
             const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
             const tileId = this.world.getTile(gx, gy);
             const tileDef = ID_TO_TILE[tileId];
             
-            // Hit HP-tiles (but NOT Trees or Boulders via projectile)
             if (tileDef && tileDef.hp && tileId !== TILES.TREE.id && tileId !== TILES.STONE_BLOCK.id) {
                 this.applyDamageToTile(gx, gy, p.damage);
                 p.active = false;
@@ -698,18 +808,11 @@ export default class Game {
     cleanupEntities() {
          if (this.network.isHost) {
             this.npcs = this.npcs.filter(n => n.hp > 0);
-            // Loot spawns are handled in applyDamageToEntity, just filtering here
-            this.npcs.forEach(n => {
-                if(n.hp <= 0) {
-                    // Assuming basic NPC drop for now if needed, currently no NPC loot logic beyond what's in Game.js already (which was minimal)
-                }
-            });
             this.boats = this.boats.filter(b => b.hp > 0);
             
-            // Filter dead animals and drop loot
             const deadAnimals = this.animals.filter(a => a.hp <= 0);
             deadAnimals.forEach(a => {
-                this.spawnLoot(a.x, a.y, 'sheep'); // Assuming all animals are sheep for now
+                this.spawnLoot(a.x, a.y, 'sheep'); 
                 this.spawnParticles(a.x, a.y, '#f00', 8);
             });
             this.animals = this.animals.filter(a => a.hp > 0);
@@ -728,12 +831,11 @@ export default class Game {
     handleRespawnTimer(deltaTime) {
         this.respawnTimer -= deltaTime;
         
-        // Update the UI with the new time
         this.showMessage(`YOU DIED! RESPAWN IN ${Math.ceil(this.respawnTimer / 1000)}s`, "#f00");
 
         if (this.respawnTimer <= 0) {
             this.respawn();
-            this.showMessage("", "#fff"); // Clear message on respawn
+            this.showMessage("", "#fff");
         }
     }
     

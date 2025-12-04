@@ -1,6 +1,21 @@
 body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Courier New', Courier, monospace; color: #eee; user-select: none; }
 canvas { display: block; image-rendering: pixelated; }
-#ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; width: 100%; height: 100%; }
+
+/* [MODIFIED] UI Layer Layout for Split Stats */
+#ui-layer { 
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+    pointer-events: none; 
+    width: 100%; 
+    height: 100%;
+    display: flex; 
+    justify-content: space-between; 
+    align-items: flex-start; 
+    padding: 10px; 
+    box-sizing: border-box; 
+}
+
 .stat-box { background: rgba(0, 0, 0, 0.7); padding: 10px; border: 2px solid #555; margin-bottom: 5px; pointer-events: auto; width: fit-content; }
 
 /* --- INVENTORY LAYOUT --- */

@@ -233,15 +233,14 @@ export class Entity {
     handleImpact(game, targetX, targetY) {
         if (this.ramCooldown > 0) return;
         
-        // Only NPCs/Enemies ram things
-        if (this.type !== 'npc' && !(this.type === 'boat' && this.owner === 'enemy')) return;
+        // [FIX] Simplified to allow any Boat or NPC to ram
+        if (this.type !== 'npc' && this.type !== 'boat') return;
 
         const gridX = Math.floor(targetX / CONFIG.TILE_SIZE);
         const gridY = Math.floor(targetY / CONFIG.TILE_SIZE);
         const tileId = game.world.getTile(gridX, gridY);
         const tileDef = ID_TO_TILE[tileId];
 
-        // ... Ramming Logic (Damage walls or boats) ...
         if (tileDef && tileDef.hp) {
              game.applyDamageToTile(gridX, gridY, CONFIG.NPC_RAM.DAMAGE_STRUCTURE);
              this.ramCooldown = CONFIG.NPC_RAM.COOLDOWN;
@@ -296,6 +295,17 @@ export class Entity {
             
             p.life = config.CANNON_RANGE; 
             game.projectiles.push(p);
+
+            // [FIX] Allow broadcasting from Enemy Ships as well as Players
+            if (game.network) {
+                 game.network.actions.sendShoot({
+                    x: sx, y: sy,
+                    tx: tx, ty: ty,
+                    dmg: config.CANNON_DAMAGE, spd: config.CANNON_SPEED,
+                    col: '#111', type: 'cannonball',
+                    life: config.CANNON_RANGE
+                });
+            }
         }
         
         // Recoil Effect

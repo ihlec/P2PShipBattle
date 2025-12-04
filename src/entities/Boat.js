@@ -1,7 +1,7 @@
 import { Entity } from './Entity.js';
 import { CONFIG, TILES } from '../config.js';
 import Utils from '../utils.js';
-import { Raider } from './Npc.js'; // Import Raider
+import { Raider } from './Npc.js'; 
 
 export class Boat extends Entity {
     constructor(x, y, owner = 'player') {
@@ -24,7 +24,6 @@ export class Boat extends Entity {
         };
     }
 
-    // [NEW] Static helper to spawn an enemy boat near the player
     static createInvasionForce(game) {
         const player = game.player;
         const world = game.world;
@@ -57,33 +56,36 @@ export class Boat extends Entity {
         const tile = world.getTile(gridX, gridY);
         const isWater = (tile === TILES.WATER.id || tile === TILES.DEEP_WATER.id);
 
-        if (isWater) {
-            const dist = Utils.distance(this, player);
+        // [MODIFIED] Find closest target instead of hardcoding "player"
+        const target = this.findClosestTarget(game);
+
+        if (isWater && target) {
+            const dist = Utils.distance(this, target);
             const input = { up: false, down: false, left: false, right: false };
-            const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+            const angleToTarget = Math.atan2(target.y - this.y, target.x - this.x);
             
             let heading = this.boatStats.heading % (Math.PI * 2);
             if (heading > Math.PI) heading -= Math.PI * 2;
             if (heading < -Math.PI) heading += Math.PI * 2;
 
-            let desiredAngle = angleToPlayer;
+            let desiredAngle = angleToTarget;
             const BROADSIDE_RANGE = 300;
             const MIN_RANGE = 150;
 
             // Attempt to flank for broadside if within range
             if (dist < BROADSIDE_RANGE && dist > MIN_RANGE) {
-                let relative = angleToPlayer - heading;
+                let relative = angleToTarget - heading;
                 while (relative > Math.PI) relative -= Math.PI * 2;
                 while (relative < -Math.PI) relative += Math.PI * 2;
-                if (relative > 0) desiredAngle = angleToPlayer - Math.PI / 2;
-                else desiredAngle = angleToPlayer + Math.PI / 2;
+                if (relative > 0) desiredAngle = angleToTarget - Math.PI / 2;
+                else desiredAngle = angleToTarget + Math.PI / 2;
             }
 
             // Wind Tacking Logic
             const windDir = world.wind.angle;
             let windDiff = Math.cos(windDir - desiredAngle);
             if (windDiff < -0.5) {
-                if (!this.aiState) this.aiState = { tackTimer: 0, tackState: 1 }; // Init AI state if missing
+                if (!this.aiState) this.aiState = { tackTimer: 0, tackState: 1 }; 
                 this.aiState.tackTimer++;
                 if (this.aiState.tackTimer > 400) {
                     this.aiState.tackState *= -1;
@@ -104,12 +106,10 @@ export class Boat extends Entity {
             else if (Math.abs(diff) > 2.0) input.down = true;
             else input.up = false;
 
-            // Ensure Entity.js handleInput/updateBoatMovement logic can be called or duplicated here
-            // Since `updateBoatMovement` is an Entity method, we call it directly:
             this.updateBoatMovement(input, deltaTime, world, game);
 
             // Fire Broadside
-            let angleRelative = angleToPlayer - heading;
+            let angleRelative = angleToTarget - heading;
             while (angleRelative > Math.PI) angleRelative -= Math.PI * 2;
             while (angleRelative < -Math.PI) angleRelative += Math.PI * 2;
             const broadsideThreshold = 0.3;
@@ -120,6 +120,26 @@ export class Boat extends Entity {
 
         // --- Wave Spawn Logic ---
         this.updateWaveLogic(game, world);
+    }
+
+    // [NEW] Helper to target closest player/peer
+    findClosestTarget(game) {
+        let closest = null;
+        let minDst = 1000; // Search range
+
+        // Combine Host and Peers
+        const potentialTargets = [game.player, ...Object.values(game.peers)];
+
+        potentialTargets.forEach(p => {
+            if (p.hp > 0 && !p.godMode) {
+                const d = Utils.distance(this, p);
+                if (d < minDst) {
+                    minDst = d;
+                    closest = p;
+                }
+            }
+        });
+        return closest;
     }
 
     updateWaveLogic(game, world) {
@@ -161,7 +181,6 @@ export class Boat extends Entity {
                 const isWater = (t === TILES.WATER.id || t === TILES.DEEP_WATER.id);
 
                 if (!isWater) {
-                    // Spawn a Raider instead of generic Entity
                     const raider = new Raider(tx, ty);
                     game.npcs.push(raider);
 

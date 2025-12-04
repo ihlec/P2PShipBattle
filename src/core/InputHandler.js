@@ -13,15 +13,28 @@ export default class InputHandler {
         this.wheel = 0;
 
         window.addEventListener('keydown', e => {
+            // [FIX] Ignore input if typing in a text field
+            if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
             this.keys[e.key.toLowerCase()] = true;
+            
             if(e.key.toLowerCase() === 'escape') {
+                // [FIX] Correctly cancel blueprint
+                this.game.activeBlueprint = null;
+                this.game.player.selectedTile = null;
+                this.game.ui.update();
+
                 const bpMenu = document.getElementById('blueprint-menu');
                 if (bpMenu) bpMenu.style.display = 'none';
             }
+            
             if(e.key.toLowerCase() === 'b') this.game.ui.toggleBlueprints(); 
         });
         
-        window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
+        window.addEventListener('keyup', e => {
+             if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+             this.keys[e.key.toLowerCase()] = false;
+        });
         
         window.addEventListener('mousemove', e => { 
             this.mouse.x = e.clientX; 
@@ -45,14 +58,6 @@ export default class InputHandler {
             this.wheel += e.deltaY; 
             e.preventDefault(); 
         }, { passive: false });
-    }
-
-    handleInteraction(game) {
-        // ... (Interaction logic logic moved from original game.js handleInteraction) ...
-        // Since this logic is complex and deeply tied to Game state, we keep the method hook
-        // but the implementation logic resides in Game.js or here. 
-        // For the sake of this refactor, we will rely on Game.js calling logic, 
-        // but we expose the clean input state here.
     }
 
     flush() {

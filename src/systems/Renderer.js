@@ -57,14 +57,12 @@ export default class Renderer {
                 const tile = ID_TO_TILE[id];
                 if (!tile) continue;
 
-                // Draw Water/Ground (skipping trees/walls which are drawn later)
                 if ((!tile.solid || tile.isWater) && id !== TILES.TREE.id && id !== TILES.WOOD_WALL_OPEN.id && id !== TILES.TORCH.id) {
                     const tx = c * CONFIG.TILE_SIZE;
                     const ty = r * CONFIG.TILE_SIZE;
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                     
-                    // Detail Noise
                     if (id === TILES.GRASS.id || id === TILES.SAND.id) {
                         const noise = Utils.noise(c, r, this.game.world.seed);
                         if (noise > 0.7) {
@@ -75,7 +73,6 @@ export default class Renderer {
                     }
                 }
                 
-                // Ground under Fences (Open or Closed) AND Torches - Shows biome underneath
                 if (id === TILES.WOOD_WALL_OPEN.id || id === TILES.WOOD_WALL.id || id === TILES.TORCH.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
@@ -85,7 +82,6 @@ export default class Renderer {
                      this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
                 }
 
-                // Ground under Trees/Mountains
                 if (id === TILES.TREE.id || id === TILES.MOUNTAIN.id) {
                      const tx = c * CONFIG.TILE_SIZE;
                      const ty = r * CONFIG.TILE_SIZE;
@@ -105,23 +101,16 @@ export default class Renderer {
                 const tx = c * CONFIG.TILE_SIZE;
                 const ty = r * CONFIG.TILE_SIZE;
 
-                // Static Structures
                 if (id === TILES.GREY.id) {
-                    // Check if this is a bridge (over water)
                     const biome = Utils.getBiome(c, r, this.game.world.seed);
                     const isOverWater = (biome === TILES.WATER.id || biome === TILES.DEEP_WATER.id);
-                    
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-
                     if (isOverWater) {
                         this.drawBridgeWalls(tx, ty, c, r);
                     }
                 }
-                else if (id === TILES.ROAD.id) {
-                    // Road Segment (Blueprint) - Detailed Paving
-                    this.drawRoad(tx, ty, c, r);
-                }
+                else if (id === TILES.ROAD.id) this.drawRoad(tx, ty, c, r);
                 else if (id === TILES.WALL.id) this.drawStoneWall(tx, ty, tile.color, c, r);
                 else if (id === TILES.WOOD_WALL.id || id === TILES.WOOD_WALL_OPEN.id) this.drawWoodFence(tx, ty, c, r, id === TILES.WOOD_WALL_OPEN.id);
                 else if (id === TILES.WOOD_RAIL.id) {
@@ -155,13 +144,11 @@ export default class Renderer {
                 else if (tile.solid && !tile.isWater && !tile.isTower && id !== TILES.WALL.id && id !== TILES.WOOD_WALL.id && id !== TILES.WOOD_RAIL.id && id !== TILES.GREY.id) {
                     this.ctx.fillStyle = tile.color;
                     this.ctx.fillRect(tx, ty, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
-                    // Generic bevel
                     this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
                     this.ctx.fillRect(tx + CONFIG.TILE_SIZE - 4, ty, 4, CONFIG.TILE_SIZE); 
                     this.ctx.fillRect(tx, ty + CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE, 4); 
                 }
 
-                // Tile Health Bars
                 if (tile.hp) {
                     const tileKey = `${c},${r}`;
                     const tileData = this.game.world.tileData[tileKey];
@@ -179,7 +166,6 @@ export default class Renderer {
                 }
             }
 
-            // Entities
             if (rowBuckets[r]) {
                 rowBuckets[r].forEach(obj => {
                     if (obj._type === 'boat') {
@@ -211,11 +197,8 @@ export default class Renderer {
                                 const lx = obj.x - 6;
                                 const ly = obj.y - 6 + bob;
                                 const lw = 12;
-                                
                                 this.ctx.fillStyle = ID_TO_TILE[obj.id].color;
                                 this.ctx.fillRect(lx, ly, lw, lw);
-                                
-                                // Draw Border around land loot
                                 this.ctx.strokeStyle = '#000';
                                 this.ctx.lineWidth = 1;
                                 this.ctx.strokeRect(lx, ly, lw, lw);
@@ -229,7 +212,8 @@ export default class Renderer {
                         if (obj._orig.inBoat) {
                             const heading = (obj._orig.boatStats && obj._orig.boatStats.heading !== undefined) ? obj._orig.boatStats.heading : 0;
                             
-                            this.drawBoat(obj.x, obj.y, heading, 'player', 100, 100, obj._orig);
+                            // [FIX] Pass actual HP from entity (which is boat structure HP) instead of hardcoded 100
+                            this.drawBoat(obj.x, obj.y, heading, 'player', obj._orig.hp, 100, obj._orig);
                             
                             this.ctx.save();
                             this.ctx.translate(obj.x, obj.y);
@@ -256,16 +240,13 @@ export default class Renderer {
             }
         }
 
-        // Projectiles
         this.ctx.fillStyle = '#fff';
         this.game.projectiles.forEach(p => {
             if(p.draw) p.draw(this.ctx, 0, 0); 
         });
 
-        // Particles
         this.game.particles.draw(this.ctx); 
 
-        // Blueprints Ghost
         if (this.game.activeBlueprint) {
             const mx = (this.game.input.mouse.x / this.game.zoom) + this.game.camera.x;
             const my = (this.game.input.mouse.y / this.game.zoom) + this.game.camera.y;
@@ -288,15 +269,12 @@ export default class Renderer {
         
         this.ctx.restore(); 
 
-        // Lighting
         this.renderLighting();
 
-        // Wind Particles
         if (this.game.particles.windParticles) {
             this.game.particles.windParticles.forEach(p => p.draw(this.ctx, this.game.world.wind.angle));
         }
 
-        // Floating Text
         this.ctx.font = "bold 14px monospace";
         this.ctx.textAlign = 'left';
         this.ctx.save();
@@ -312,22 +290,17 @@ export default class Renderer {
         this.ctx.restore();
     }
 
-    // --- HELPER DRAW FUNCTIONS ---
-
     drawBridgeWalls(tx, ty, c, r) {
         const ts = CONFIG.TILE_SIZE;
         const world = this.game.world;
         
-        // Helper to check if a tile is water/deep water
         const isWater = (id) => id === TILES.WATER.id || id === TILES.DEEP_WATER.id;
         
-        // Check neighbors
         const n = world.getTile(c, r - 1);
         const s = world.getTile(c, r + 1);
         const w = world.getTile(c - 1, r);
         const e = world.getTile(c + 1, r);
 
-        // Wood Colors
         const woodDark = '#5C3317';
         const woodLight = '#8B4513';
 
@@ -343,13 +316,11 @@ export default class Renderer {
             }
         };
 
-        // If neighbor is water, draw a small wall on that side
         if (isWater(n)) drawRail(tx, ty, ts, 4, false);
         if (isWater(s)) drawRail(tx, ty + ts - 4, ts, 4, false);
         if (isWater(w)) drawRail(tx, ty, 4, ts, true);
         if (isWater(e)) drawRail(tx + ts - 4, ty, 4, ts, true);
         
-        // Corner posts for polish
         this.ctx.fillStyle = '#3E2723';
         if (isWater(n) || isWater(w)) this.ctx.fillRect(tx, ty, 4, 4);
         if (isWater(n) || isWater(e)) this.ctx.fillRect(tx + ts - 4, ty, 4, 4);
@@ -358,30 +329,26 @@ export default class Renderer {
     }
 
     drawRoad(tx, ty, c, r) {
-        // Paving Stone Look (4x4 Grid of stones per tile)
         const ts = CONFIG.TILE_SIZE;
         const gridSize = 4;
-        const stoneSize = ts / gridSize; // 8px per stone
+        const stoneSize = ts / gridSize; 
 
-        // Base/Grout
-        this.ctx.fillStyle = '#4a4a4a'; // Dark grey grout
+        this.ctx.fillStyle = '#4a4a4a'; 
         this.ctx.fillRect(tx, ty, ts, ts);
 
         for (let y = 0; y < gridSize; y++) {
             for (let x = 0; x < gridSize; x++) {
-                const sx = tx + x * stoneSize + 1; // +1 for grout spacing
+                const sx = tx + x * stoneSize + 1;
                 const sy = ty + y * stoneSize + 1;
-                const sw = stoneSize - 2; // -2 to leave grout
+                const sw = stoneSize - 2; 
                 const sh = stoneSize - 2;
 
-                // Slight color variation based on position
                 const noise = Utils.noise(c * 4 + x, r * 4 + y, this.game.world.seed);
-                const shade = 100 + Math.floor(noise * 40); // 100-140 brightness
+                const shade = 100 + Math.floor(noise * 40); 
                 
                 this.ctx.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
                 this.ctx.fillRect(sx, sy, sw, sh);
                 
-                // Highlight (Bevel effect)
                 this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
                 this.ctx.fillRect(sx, sy, sw, 1);
                 this.ctx.fillRect(sx, sy, 1, sh);
@@ -406,7 +373,6 @@ export default class Renderer {
 
     drawWoodFence(tx, ty, c, r, isOpen) { 
         const ts = CONFIG.TILE_SIZE;
-        // Background removed here to let biome show through from Pass 1
         this.ctx.fillStyle = '#5C3317';
         if (isOpen) {
             this.ctx.fillRect(tx, ty, 6, ts);
@@ -444,7 +410,6 @@ export default class Renderer {
         this.ctx.strokeStyle = 'rgba(0,0,0,0.3)';
         this.ctx.strokeRect(tx - 2, topY, ts + 4, ts);
         
-        // Cannon ammo display
         const cannon = this.game.cannons.find(can => can.key === `${c},${r}`);
         if (cannon) {
             this.ctx.fillStyle = cannon.ammo > 0 ? '#0ff' : '#f00';
@@ -489,7 +454,6 @@ export default class Renderer {
 
     drawTree(tx, ty, c, r, rowBuckets) { 
         let isOccluding = false;
-        // Check if entity is behind tree
         if (rowBuckets && rowBuckets[r] && rowBuckets[r].some(e => Math.floor(e.x / CONFIG.TILE_SIZE) === c)) {
             isOccluding = true;
         }
@@ -534,35 +498,25 @@ export default class Renderer {
         this.ctx.translate(x, y);
         this.ctx.rotate(heading + Math.PI / 2);
         
-        const rows = SHIP_LAYOUT.length; // 6
-        const cols = SHIP_LAYOUT[0].length; // 3
+        const rows = SHIP_LAYOUT.length; 
+        const cols = SHIP_LAYOUT[0].length; 
         const ts = 16;
         const width = cols * ts;
         const height = rows * ts;
         const startX = -width / 2;
         const startY = -height / 2;
 
-        // 1. Realistic Hull Shape (Symmetrical)
-        this.ctx.fillStyle = '#3E2723'; // Dark Wood Hull
+        this.ctx.fillStyle = '#3E2723'; 
         this.ctx.beginPath();
-        
-        // Symmetrical curve logic
-        // Bow Point
         this.ctx.moveTo(0, startY);
-        
-        // Right Side Curve
         this.ctx.quadraticCurveTo(width / 2 + 4, startY + height / 3, width / 2, startY + height - 8);
         this.ctx.quadraticCurveTo(width / 2, startY + height, 0, startY + height);
-        
-        // Left Side Curve (Mirrored)
         this.ctx.quadraticCurveTo(-width / 2, startY + height, -width / 2, startY + height - 8);
         this.ctx.quadraticCurveTo(-width / 2 - 4, startY + height / 3, 0, startY);
-        
         this.ctx.closePath();
         this.ctx.fill();
         this.ctx.stroke(); 
 
-        // Inner Deck (lighter wood)
         this.ctx.fillStyle = '#5D4037';
         this.ctx.beginPath();
         this.ctx.moveTo(0, startY + 6);
@@ -574,34 +528,30 @@ export default class Renderer {
 
         let mastX = 0, mastY = 0, hasMast = false;
         
-        // Render Layout Items
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
                 const type = SHIP_LAYOUT[r][c];
                 const dx = startX + c * ts;
                 const dy = startY + r * ts;
                 
-                // Deck Planking details
-                if (type === 40 || type === 43 || type === 42) { // Deck, Cannon, Mast have deck under
+                if (type === 40 || type === 43 || type === 42) { 
                      this.ctx.fillStyle = 'rgba(0,0,0,0.1)';
-                     // Vertical plank lines
                      this.ctx.fillRect(dx, dy, 1, ts); 
                      this.ctx.fillRect(dx + ts/2, dy, 1, ts);
-                     // Nail holes
                      this.ctx.fillStyle = 'rgba(0,0,0,0.2)';
                      this.ctx.fillRect(dx + 2, dy + 2, 1, 1);
                      this.ctx.fillRect(dx + ts - 2, dy + ts - 2, 1, 1);
                 }
 
-                if (type === 44) { // Bow Sprit
+                if (type === 44) { 
                      this.ctx.fillStyle = '#5C3317';
                      this.ctx.beginPath();
                      this.ctx.moveTo(dx + ts/2, dy + ts);
-                     this.ctx.lineTo(dx + ts/2, dy - 8); // Stick out
+                     this.ctx.lineTo(dx + ts/2, dy - 8); 
                      this.ctx.strokeStyle = '#3E2723';
                      this.ctx.lineWidth = 2;
                      this.ctx.stroke();
-                } else if (type === 42) { // Mast
+                } else if (type === 42) { 
                     mastX = dx + ts / 2;
                     mastY = dy + ts / 2;
                     hasMast = true;
@@ -609,27 +559,23 @@ export default class Renderer {
             }
         }
 
-        // Draw 3 Cannons on each side (Manually positioned for better look)
-        // Adjusted spacing to be tighter: 1.5 -> 1.8, 4.5 -> 4.2 (Center remains 3.0)
         const cannonYPositions = [startY + ts * 1.8, startY + ts * 3, startY + ts * 4.2];
         
-        this.ctx.fillStyle = '#111'; // Cannon Barrel
-        const drawCannon = (cx, cy, side) => { // side: -1 left, 1 right
+        this.ctx.fillStyle = '#111'; 
+        const drawCannon = (cx, cy, side) => { 
             this.ctx.save();
             this.ctx.translate(cx, cy);
             if (side === -1) this.ctx.rotate(-Math.PI/2);
             else this.ctx.rotate(Math.PI/2);
             
-            // Mount
             this.ctx.fillStyle = '#3E2723';
             this.ctx.fillRect(-3, -3, 6, 6);
             
-            // Barrel
             this.ctx.fillStyle = '#111';
             this.ctx.beginPath();
             this.ctx.moveTo(-2, -2);
             this.ctx.lineTo(2, -2);
-            this.ctx.lineTo(3, 8); // Flared end
+            this.ctx.lineTo(3, 8); 
             this.ctx.lineTo(-3, 8);
             this.ctx.closePath();
             this.ctx.fill();
@@ -637,46 +583,38 @@ export default class Renderer {
         };
 
         cannonYPositions.forEach(cy => {
-            drawCannon(startX + 4, cy, -1); // Left
-            drawCannon(startX + width - 4, cy, 1); // Right
+            drawCannon(startX + 4, cy, -1); 
+            drawCannon(startX + width - 4, cy, 1); 
         });
 
-        // Draw Mast and Sail
         if (hasMast) {
             this.ctx.save();
             this.ctx.translate(mastX, mastY);
             
-            // Calculate Wind Interaction
             let windAngle = this.game.world.wind.angle;
             let boatAngle = heading + Math.PI/2;
             let relWind = windAngle - boatAngle;
             
-            // Normalize angle
             while (relWind <= -Math.PI) relWind += Math.PI*2;
             while (relWind > Math.PI) relWind -= Math.PI*2;
 
-            // Sail Rotation (attempt to catch wind, clamped)
             let sailAngle = relWind * 0.8; 
-            // Clamp sail so it doesn't spin wildly through the mast, usually sails swing +/- 90 degrees
             sailAngle = Math.max(-Math.PI/2, Math.min(Math.PI/2, sailAngle));
 
             this.ctx.rotate(sailAngle);
             
-            // Boom
             this.ctx.fillStyle = '#5D4037'; 
             this.ctx.fillRect(-24, -2, 48, 4);
             
-            // Sail (Curved)
-            const fullness = 10 + Math.sin(Date.now() / 200) * 2; // Breathing effect
+            const fullness = 10 + Math.sin(Date.now() / 200) * 2; 
             this.ctx.fillStyle = owner === 'enemy' ? '#222' : '#eee'; 
             this.ctx.beginPath();
             this.ctx.moveTo(-22, 0);
-            this.ctx.quadraticCurveTo(0, -fullness - 20, 22, 0); // Billow out
+            this.ctx.quadraticCurveTo(0, -fullness - 20, 22, 0); 
             this.ctx.lineTo(22, 2);
             this.ctx.quadraticCurveTo(0, -fullness - 18, -22, 2);
             this.ctx.fill();
             
-            // Mast Circle (Top)
             this.ctx.fillStyle = '#3E2723';
             this.ctx.beginPath();
             this.ctx.arc(0, 0, 4, 0, Math.PI * 2);

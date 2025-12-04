@@ -2,6 +2,7 @@ import { joinRoom } from 'https://cdn.skypack.dev/trystero@0.15.1';
 import { Entity } from '../entities/Entity.js';
 import { Sheep } from '../entities/Npc.js';
 import { Boat } from '../entities/Boat.js';
+import { Projectile } from '../entities/Projectile.js'; 
 import { CONFIG, TILES, ID_TO_TILE } from '../config.js'; 
 import Utils from '../utils.js';
 
@@ -12,14 +13,13 @@ export default class Network {
         this.isHost = isHost;
         this.playerName = playerName;
         this.lastEntitySyncTime = 0;
+        this.hostId = null; // [NEW] Track who the host is
         
         const config = { 
             appId: 'pixel-warfare-v2',
             trackerUrls: [
-                'wss://tracker.openwebtorrent.com',
-                'wss://tracker.btorrent.xyz',
-                'wss://tracker.webtorrent.dev',
-                'wss://tracker.files.fm:7073/announce' 
+                'wss://tracker.webtorrent.dev', 
+                'wss://tracker.openwebtorrent.com'
             ]
         };
         this.room = joinRoom(config, roomId);
@@ -32,38 +32,49 @@ export default class Network {
         const [sendTileUpd, getTileUpd] = this.room.makeAction('tileUpd');
         const [sendDamage, getDamage] = this.room.makeAction('damage');
         const [sendEntities, getEntities] = this.room.makeAction('ents');
-        const [sendEntityRequest, getEntityRequest] = this.room.makeAction('entReq');
-        const [sendEntityHit, getEntityHit] = this.room.makeAction('entHit');
+        const [sendEntReq, getEntReq] = this.room.makeAction('entReq');
+        const [sendEntHit, getEntHit] = this.room.makeAction('entHit');
+        
+        const [sendShoot, getShoot] = this.room.makeAction('shoot');
+        const [sendCannon, getCannon] = this.room.makeAction('cannon');
 
         this.actions = { 
             sendInit, sendWorld, sendPlayer, sendTileReq, sendTileUpd, 
-            sendDamage, sendEntities, sendEntityRequest, sendEntityHit 
+            sendDamage, sendEntities, sendEntReq, sendEntHit,
+            sendShoot, sendCannon
         };
 
-        this.setupListeners(getInit, getWorld, getPlayer, getTileReq, getTileUpd, getDamage, getEntities, getEntityRequest, getEntityHit);
+        this.setupListeners(
+            getInit, getWorld, getPlayer, getTileReq, getTileUpd, 
+            getDamage, getEntities, getEntReq, getEntHit,
+            getShoot, getCannon
+        );
     }
 
-    setupListeners(getInit, getWorld, getPlayer, getTileReq, getTileUpd, getDamage, getEntities, getEntityRequest, getEntityHit) {
+    setupListeners(getInit, getWorld, getPlayer, getTileReq, getTileUpd, getDamage, getEntities, getEntReq, getEntHit, getShoot, getCannon) {
         this.room.onPeerJoin(peerId => {
             console.log(`Peer joined: ${peerId}`);
-            if (this.isHost) {
-                this.actions.sendWorld({
-                    seed: this.game.world.seed,
-                    modified: this.game.world.modifiedTiles,
-                    time: this.game.world.time,
-                    spawnX: Math.floor(this.game.spawnPoint.x),
-                    spawnY: Math.floor(this.game.spawnPoint.y)
-                }, peerId);
-            }
             this.actions.sendInit({ name: this.playerName }, peerId);
+            if (this.isHost) {
+                this.broadcastWorldState(peerId);
+            }
         });
 
         this.room.onPeerLeave(peerId => {
             console.log(`Peer left: ${peerId}`);
             delete this.game.peers[peerId];
+
+            // [NEW] Check if the leaving peer was the Host
+            if (!this.isHost && peerId === this.hostId) {
+                this.game.showMessage("CONNECTION LOST", "#f00");
+                // Optional: Stop game loop or disable controls here if desired
+            }
         });
 
         getInit((data, peerId) => {
+            if (this.isHost) {
+                this.broadcastWorldState(peerId);
+            }
             if (!this.game.peers[peerId]) {
                 this.game.peers[peerId] = { 
                     id: peerId, type: 'peer',
@@ -78,12 +89,18 @@ export default class Network {
 
         getWorld((data, peerId) => {
             if (!this.isHost) {
+                console.log("Received World Data");
+                
+                // [NEW] Record the Host ID
+                this.hostId = peerId;
+
                 this.game.world.importData({
                     seed: data.seed,
                     modifiedTiles: data.modified,
                     time: data.time
                 });
-                if (data.spawnX && data.spawnY) {
+                
+                if (data.spawnX && data.spawnY && this.game.player.x === 0 && this.game.player.y === 0) {
                     const offsetX = (Math.random() - 0.5) * 128;
                     const offsetY = (Math.random() - 0.5) * 128;
                     this.game.player.x = data.spawnX + offsetX;
@@ -134,32 +151,51 @@ export default class Network {
             }
         });
 
-        // --- Restored Logic for Entity Sync ---
-
         getEntities((data) => {
             if (!this.isHost) {
                 this.syncList(data.n, this.game.npcs, 'npc');
                 this.syncList(data.a, this.game.animals, 'sheep');
                 this.syncList(data.b, this.game.boats, 'boat');
+                this.syncLoot(data.l);
             }
         });
 
         getTileReq((data, peerId) => {
             if (this.isHost) {
                 if (data.type === 'build') {
-                    // Simple validation could go here
-                    this.game.world.setTile(data.x, data.y, data.id);
-                    this.actions.sendTileUpd({ x: data.x, y: data.y, id: data.id, action: 'set' });
+                    const gx = data.x;
+                    const gy = data.y;
+                    const id = data.id;
+                    const current = this.game.world.getTile(gx, gy);
+
+                    // 1. Check if overwriting valid base terrain
+                    const baseTerrains = [TILES.GRASS.id, TILES.SAND.id, TILES.WATER.id, TILES.DEEP_WATER.id];
+                    if (!baseTerrains.includes(current) && current !== id) return;
+
+                    // 2. Water Logic
+                    const isWater = (current === TILES.WATER.id || current === TILES.DEEP_WATER.id);
+                    if (isWater) {
+                        const allowedOnWater = [TILES.GREY.id, TILES.WOOD_RAIL.id];
+                        if (!allowedOnWater.includes(id)) return;
+                    }
+                    
+                    // 3. Occupancy Check (Validation on Host)
+                    if (ID_TO_TILE[id].solid && this.game.isTileOccupied(gx, gy)) return;
+
+                    this.game.world.setTile(gx, gy, id);
+                    this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
+                    
+                    this.game.recalculateCannons();
+
                 } else if (data.type === 'damage') {
                     this.game.applyDamageToTile(data.x, data.y, data.dmg);
                 } else if (data.type === 'remove') {
-                    // Tree removal request
-                    this.game.requestRemove(data.x, data.y, data.id);
+                    this.requestRemove(data.x, data.y, data.id);
                 }
             }
         });
 
-        getEntityRequest((data, peerId) => {
+        getEntReq((data, peerId) => {
             if (this.isHost) {
                 if (data.act === 'spawnBoat') {
                     const b = new Boat(data.x, data.y);
@@ -176,13 +212,14 @@ export default class Network {
                     }
                 } else if (data.act === 'refill') {
                     const c = this.game.cannons.find(can => can.key === data.id);
-                    if (c) c.ammo += 5;
+                    if (c) {
+                        c.ammo += 5;
+                        this.game.spawnText(c.x, c.y, "+5 AMMO", "#00ffff");
+                        this.actions.sendCannon({ key: c.key, act: 'upd', ammo: c.ammo });
+                    }
                 } else if (data.act === 'pickup') {
-                    // Basic loot claim logic
                     const lIdx = this.game.loot.findIndex(l => l.uid === data.id);
                     if (lIdx !== -1) {
-                         // We could strictly track who picked it up, 
-                         // but for now we just remove it to prevent duplicates
                          this.game.loot.splice(lIdx, 1);
                     }
                 }
@@ -197,9 +234,8 @@ export default class Network {
              }
         });
         
-        getEntityHit((data) => {
+        getEntHit((data) => {
             if (this.isHost) {
-                // Find entity in all lists
                 const target = [...this.game.npcs, ...this.game.animals, ...this.game.boats].find(e => e.id === data.id);
                 if (target) {
                     target.hp -= data.dmg;
@@ -207,12 +243,47 @@ export default class Network {
                 }
             }
         });
+
+        getShoot((data, peerId) => {
+            const p = new Projectile(data.x, data.y, data.tx, data.ty, data.dmg, data.spd, data.col, false, data.type, peerId);
+            p.life = data.life;
+            this.game.projectiles.push(p);
+        });
+
+        getCannon((data) => {
+            const cannon = this.game.cannons.find(c => c.key === data.key);
+            if (!cannon) return;
+
+            if (data.act === 'shoot') {
+                cannon.ammo = data.ammo;
+                cannon.cooldown = 60; 
+                if (data.tx && data.ty) {
+                    const proj = new Projectile(cannon.x, cannon.y - 20, data.tx, data.ty, cannon.damage, 10, '#000', true, 'cannonball');
+                    this.game.projectiles.push(proj);
+                    this.game.spawnParticles(cannon.x, cannon.y - 10, '#888', 3);
+                }
+            } else if (data.act === 'upd') {
+                cannon.ammo = data.ammo;
+                if(data.cd) cannon.cooldown = data.cd;
+                this.game.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
+            }
+        });
+    }
+
+    broadcastWorldState(targetPeerId = null) {
+        if (!this.game.world) return;
+        const payload = {
+            seed: this.game.world.seed,
+            modified: this.game.world.modifiedTiles,
+            time: this.game.world.time,
+            spawnX: Math.floor(this.game.spawnPoint.x),
+            spawnY: Math.floor(this.game.spawnPoint.y)
+        };
+        this.actions.sendWorld(payload, targetPeerId);
     }
 
     syncList(sourceList, targetArray, type) {
         if (!sourceList) return;
-        
-        // 1. Update or Create
         sourceList.forEach(s => {
             let t = targetArray.find(e => e.id === s.i);
             if (!t) {
@@ -224,13 +295,33 @@ export default class Network {
                 t.targetX = s.x; t.targetY = s.y; t.hp = s.h;
                 if (s.f !== undefined) t.fed = s.f;
                 if (s.w !== undefined) t.hasWool = s.w;
-                if (s.bs && t.boatStats) t.boatStats.targetHeading = s.bs.h;
+                if (s.bs && t.boatStats) {
+                    t.boatStats.targetHeading = s.bs.h;
+                    t.boatStats.heading = s.bs.h; 
+                }
             }
         });
-
-        // 2. Remove missing
         for (let i = targetArray.length - 1; i >= 0; i--) {
             if (!sourceList.find(s => s.i === targetArray[i].id)) {
+                targetArray.splice(i, 1);
+            }
+        }
+    }
+
+    syncLoot(sourceList) {
+        if (!sourceList) return;
+        const targetArray = this.game.loot;
+        sourceList.forEach(s => {
+            let t = targetArray.find(e => e.uid === s.i);
+            if (!t) {
+                t = { uid: s.i, x: s.x, y: s.y, id: s.t, qty: s.q, bob: Math.random() * 100 };
+                targetArray.push(t);
+            } else {
+                t.x = s.x; t.y = s.y;
+            }
+        });
+        for (let i = targetArray.length - 1; i >= 0; i--) {
+            if (!sourceList.find(s => s.i === targetArray[i].uid)) {
                 targetArray.splice(i, 1);
             }
         }
@@ -249,7 +340,6 @@ export default class Network {
             });
         }
         
-        // Entity Sync for Host
         if (this.isHost) {
              const now = Date.now();
              if (now - this.lastEntitySyncTime > 50) { 
@@ -257,8 +347,9 @@ export default class Network {
                  const n = this.game.npcs.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp }));
                  const a = this.game.animals.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
                  const b = this.game.boats.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
+                 const l = this.game.loot.map(e => ({ i: e.uid, x: Math.floor(e.x), y: Math.floor(e.y), t: e.id, q: e.qty }));
                  
-                 this.actions.sendEntities({ n, a, b });
+                 this.actions.sendEntities({ n, a, b, l });
              }
         }
     }
