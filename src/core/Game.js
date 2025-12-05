@@ -263,6 +263,7 @@ export default class Game {
             const clickedTile = this.world.getTile(gx, gy);
             const cannon = this.cannons.find(c => { const [cx, cy] = c.key.split(',').map(Number); return gx === cx && gy === cy; });
             
+            // Cannon Refill Logic
             if (cannon) {
                 let requiredId = null;
                 if (clickedTile === TILES.TOWER_BASE_STONE.id) requiredId = TILES.GREY.id;
@@ -285,6 +286,28 @@ export default class Game {
             }
             
             if (!this.activeBlueprint) {
+                // [NEW] Repair Logic
+                if (this.player.selectedTile === TILES.WOOD.id) {
+                    const currentDmg = this.world.getTileDamage(gx, gy);
+                    const tileId = this.world.getTile(gx, gy);
+                    const def = ID_TO_TILE[tileId];
+
+                    // Only repair things that have HP and are currently damaged
+                    if (def && def.hp && currentDmg > 0) {
+                         if (this.player.inventory[TILES.WOOD.id] >= CONFIG.REPAIR.COST || this.godMode) {
+                             if (!this.godMode) this.player.inventory[TILES.WOOD.id] -= CONFIG.REPAIR.COST;
+                             // Apply negative damage (healing)
+                             this.applyDamageToTile(gx, gy, -CONFIG.REPAIR.AMOUNT);
+                             this.ui.update();
+                             return;
+                         } else {
+                             this.spawnText(mx, my, "NEED WOOD", "#f00");
+                             return;
+                         }
+                    }
+                }
+
+                // Gate Toggle Logic
                 if ((clickedTile === TILES.WOOD_WALL.id || clickedTile === TILES.WOOD_WALL_OPEN.id) && 
                     Utils.distance(this.player, {x: mx, y: my}) < 120) {
                     const newId = (clickedTile === TILES.WOOD_WALL.id) ? TILES.WOOD_WALL_OPEN.id : TILES.WOOD_WALL.id;
@@ -297,6 +320,7 @@ export default class Game {
                     return;
                 }
 
+                // Building/Attacking
                 const sel = this.player.selectedTile;
                 if (!sel) {
                     this.throwProjectile(mx, my);
@@ -316,6 +340,7 @@ export default class Game {
                 return;
             }
             
+            // Blueprint Logic
             if (this.activeBlueprint) {
                 const costMap = this.activeBlueprint.cost || {};
                 let affordable = true;
@@ -584,6 +609,29 @@ export default class Game {
     applyDamageToTile(gx, gy, damage) {
         const tileId = this.world.getTile(gx, gy);
         const tileDef = ID_TO_TILE[tileId];
+
+        // [NEW] Handle Healing (Negative Damage)
+        if (damage < 0) {
+            if (this.network.isHost) {
+                 this.world.hitTile(gx, gy, damage);
+                 
+                 // Clean up tileData if fully healed (dmg <= 0)
+                 if (this.world.getTileDamage(gx, gy) <= 0) {
+                     delete this.world.tileData[`${gx},${gy}`];
+                 }
+
+                 const tx = gx * CONFIG.TILE_SIZE + 16;
+                 const ty = gy * CONFIG.TILE_SIZE + 16;
+                 this.spawnParticles(tx, ty, '#0f0', 5);
+                 this.spawnText(tx, ty, `+${Math.abs(damage)}`, '#0f0');
+                 this.network.broadcastTileHit(gx, gy, damage);
+            } else {
+                 this.network.actions.sendTileReq({
+                    x: gx, y: gy, dmg: damage, type: 'damage'
+                 });
+            }
+            return;
+        }
 
         const destructible = [
             TILES.GREY.id, TILES.BLACK.id, TILES.IRON.id, TILES.GOLD.id, 
