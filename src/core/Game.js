@@ -320,7 +320,6 @@ export default class Game {
                     return;
                 }
 
-                // [FIX] Prevent placement if inventory is empty
                 if (!this.godMode && (this.player.inventory[sel] || 0) <= 0) {
                     this.spawnText(mx, my, "NO RESOURCE", "#f00");
                     return;
@@ -458,13 +457,8 @@ export default class Game {
     }
 
     tryBuild(gx, gy, id, allowRailOverwrite = false, isBridge = false, force = false) {
-        if (!this.network.isHost && !force) {
-            this.network.requestBuild(gx, gy, id);
-            return false;
-        }
-
+        // [FIX] Perform validation first, THEN check network role
         const current = this.world.getTile(gx, gy);
-        
         const baseTerrains = [TILES.GRASS.id, TILES.SAND.id, TILES.WATER.id, TILES.DEEP_WATER.id];
         
         if (!baseTerrains.includes(current) && !allowRailOverwrite && current !== id) {
@@ -480,6 +474,13 @@ export default class Game {
         
         if ((current === TILES.WATER.id || current === TILES.DEEP_WATER.id) && !isBridge) return false;
 
+        // Validation Passed: Handle Network
+        if (!this.network.isHost && !force) {
+            this.network.requestBuild(gx, gy, id);
+            return true; // Return true so inventory is deducted optimistically
+        }
+
+        // Host Logic
         this.world.setTile(gx, gy, id);
         if (this.network.isHost && !force) this.network.broadcastBuild(gx, gy, id);
         return true;

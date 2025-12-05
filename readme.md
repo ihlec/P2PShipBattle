@@ -4,7 +4,7 @@ A multiplayer top-down sandbox survival game built with vanilla JavaScript and H
 
 ## 🎮 How to Run
 
-Play the latest version at: https://ipfs.io/ipfs/bafybeiakaqjd5otpozwa6hpwx326k4epud72ewep2ookwkrxvubs5qdz4u/
+Play the latest version at: https://ipfs.io/ipfs/bafybeihmwcacmbubbh4xr6zuo5akn5utdxxyo2wuvozoi7nic75akdshw4/
 
 Because this project uses ES6 Modules, you cannot simply open `index.html` directly. You must use a local server.
 
