@@ -9,16 +9,28 @@ export const CONFIG = {
     MAX_NPCS: 30,
     WOOL_REGROW_TIME: 36000,
     
-    // [NEW] NPC RAMMING CONFIG
+    // NPC RAMMING CONFIG
     NPC_RAM: {
         DAMAGE_STRUCTURE: 30, // Damage dealt to a Wall/Tower on impact
         DAMAGE_BOAT: 50,      // Damage dealt to a Player Boat on impact
         COOLDOWN: 120         // Frames between ramming impacts (2 seconds)
     },
     
-    // [NEW] Wave Sync Timer (ms)
+    // Wave Sync Timer (ms)
     WAVE_INTERVAL: 45000, 
     
+    // BOAT Configuration
+    BOAT: {
+        ACCELERATION: 0.003,
+        RUDDER_SPEED: 0.03,
+        MAX_RUDDER: 1,
+        TURN_FACTOR: 0.5,
+        BROADSIDE_COOLDOWN: 120,
+        CANNON_SPEED: 12,
+        CANNON_DAMAGE: 40,
+        CANNON_RANGE: 60
+    },
+
     DAY_CYCLE: {
         DURATION: 24000, 
         NIGHT_OPACITY: 0.95, 
@@ -29,24 +41,6 @@ export const CONFIG = {
     REPAIR: {
         AMOUNT: 20, 
         COST: 1     
-    },
-
-    BOAT: {
-        ACCELERATION: 0.003,
-        DECELERATION: 0.02,
-        MAX_SPEED: 3.5,
-        RUDDER_SPEED: 0.03, 
-        MAX_RUDDER: 0.04,   
-        TURN_FACTOR: 0.8,
-        
-        BROADSIDE_COOLDOWN: 120, 
-        CANNON_SPEED: 12,
-        CANNON_DAMAGE: 50,
-        CANNON_RANGE: 60,
-
-        ENEMY_COOLDOWN: 180,     
-        ENEMY_DETECT_RANGE: 500,
-        ENEMY_ENGAGE_RANGE: 250  
     },
 
     WIND: {
@@ -82,12 +76,13 @@ export const TILES = {
 
     WOOD_RAIL: { id: 17, color: '#A0522D', solid: true, name: 'Wood Rail', short: 'W.Ral', hp: 30 },
 
-    TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre', hp: 40 }, // HP Added: Half of Boulder (80)
+    TREE: { id: 19, color: '#2d6e32', solid: true, name: 'Tree', short: 'Tre', hp: 40 }, 
     MOUNTAIN: { id: 20, color: '#999', solid: true, name: 'Mountain', short: 'Mnt', hp: 200 },
     GREENS: { id: 21, color: '#2d6e32', solid: false, name: 'Greens', short: 'Grn' },
     
     WOOL: { id: 22, color: '#eeeeee', solid: false, name: 'Wool', short: 'Wol' },
-    BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Boat', short: 'Bot' },
+    BOAT: { id: 24, color: '#8B4513', solid: false, name: 'Sloop', short: 'Slp' },
+    GALLEON: { id: 28, color: '#5D4037', solid: false, name: 'Galleon', short: 'Gal' }, 
     CRATE: { id: 26, color: '#CD853F', solid: false, name: 'Crate', short: 'Box' },
     
     TORCH: { id: 25, color: '#ffaa00', solid: false, name: 'Torch', short: 'Lit', hp: 10, light: 200 },
@@ -108,14 +103,45 @@ export const TILES = {
     SHIP_STERN: { id: 45, color: '#5C3317', solid: true, name: 'Stern' }
 };
 
-export const SHIP_LAYOUT = [
-    [0, 44, 0], 
-    [41, 40, 41], 
-    [43, 42, 43], 
-    [41, 40, 41], 
-    [43, 40, 43], 
-    [45, 45, 45]  
-];
+export const SHIP_SPECS = {
+    'sloop': {
+        name: "Sloop",
+        hp: 100,
+        acceleration: 0.003,
+        maxSpeed: 3.5,
+        turnSpeed: 0.03,
+        broadsideCooldown: 120,
+        ammoType: 'STN',
+        layout: [
+            [0, 44, 0], 
+            [41, 40, 41], 
+            [43, 42, 43], 
+            [41, 40, 41], 
+            [43, 40, 43], 
+            [45, 45, 45]  
+        ]
+    },
+    'galleon': {
+        name: "Galleon",
+        hp: 400,
+        acceleration: 0.002, 
+        maxSpeed: 4.0,       
+        turnSpeed: 0.015,    
+        broadsideCooldown: 100, 
+        ammoType: 'IRN',
+        layout: [
+            [0, 0, 44, 0, 0],
+            [41, 41, 40, 41, 41],
+            [43, 40, 42, 40, 43], 
+            [41, 40, 40, 40, 41],
+            [43, 40, 40, 40, 43],
+            [41, 40, 42, 40, 41], 
+            [43, 40, 40, 40, 43],
+            [41, 40, 40, 40, 41],
+            [45, 45, 45, 45, 45]
+        ]
+    }
+};
 
 export const ID_TO_TILE = Object.values(TILES).reduce((acc, t) => { acc[t.id] = t; return acc; }, {});
 
@@ -127,13 +153,15 @@ export const BLUEPRINTS = [
     { name: "Fence/Gate", structure: [{x:0, y:0, id: TILES.WOOD_WALL.id}], cost: { [TILES.WOOD.id]: 2 } },
     { name: "Bridge Block", structure: [{x:0, y:0, id: TILES.GREY.id}], cost: { [TILES.GREY.id]: 1, [TILES.WOOD.id]: 1 }, special: 'bridge' },
     { name: "Road Segment", structure: [{x:0, y:0, id: TILES.ROAD.id}], cost: { [TILES.GREY.id]: 1 } },
-    { name: "Boat", structure: [{x:0, y:0, id: TILES.BOAT.id}], cost: { [TILES.WOOD.id]: 5, [TILES.WOOL.id]: 2 }, special: 'boat' },
+    { name: "Sloop", structure: [{x:0, y:0, id: TILES.BOAT.id}], cost: { [TILES.WOOD.id]: 5, [TILES.WOOL.id]: 2 }, special: 'boat' },
+    { name: "Galleon", structure: [{x:0, y:0, id: TILES.GALLEON.id}], cost: { [TILES.WOOD.id]: 20, [TILES.WOOL.id]: 10, [TILES.IRON.id]: 10, [TILES.GOLD.id]: 5 }, special: 'galleon' }, 
     { name: "Torch", structure: [{x:0, y:0, id: TILES.TORCH.id}], cost: { [TILES.WOOD.id]: 1, [TILES.BLACK.id]: 1 } }
 ];
 
+// [MODIFIED] Reduced Sword Damage
 export const WEAPONS = {
     SPEAR_WOOD: { id: TILES.SPEAR_WOOD.id, name: "Obsidian Spear", type: 'range', damage: 35, speed: 10, range: 60, color: '#8B4513', cost: { [TILES.BLACK.id]: 1, [TILES.WOOD.id]: 2 } },
     SPEAR_IRON: { id: TILES.SPEAR_IRON.id, name: "Iron Spear", type: 'range', damage: 60, speed: 14, range: 60, color: '#aaa', cost: { [TILES.WOOD.id]: 1, [TILES.IRON.id]: 2 } },
-    SWORD_WOOD: { id: TILES.SWORD_WOOD.id, name: "Obsidian Sword", type: 'melee', damage: 50, cost: { [TILES.BLACK.id]: 1, [TILES.WOOD.id]: 2 } },
-    SWORD_IRON: { id: TILES.SWORD_IRON.id, name: "Iron Sword", type: 'melee', damage: 90, cost: { [TILES.IRON.id]: 2, [TILES.GOLD.id]: 1 } }
+    SWORD_WOOD: { id: TILES.SWORD_WOOD.id, name: "Obsidian Sword", type: 'melee', damage: 25, cost: { [TILES.BLACK.id]: 1, [TILES.WOOD.id]: 2 } },
+    SWORD_IRON: { id: TILES.SWORD_IRON.id, name: "Iron Sword", type: 'melee', damage: 55, cost: { [TILES.IRON.id]: 2, [TILES.GOLD.id]: 1 } }
 };

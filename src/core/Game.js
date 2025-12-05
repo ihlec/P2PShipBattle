@@ -1,5 +1,4 @@
-
-import { CONFIG, TILES, ID_TO_TILE } from '../config.js';
+import { CONFIG, TILES, ID_TO_TILE, WEAPONS } from '../config.js';
 import Utils from '../utils.js';
 import InputHandler from './InputHandler.js';
 import Network from './Network.js';
@@ -92,7 +91,7 @@ export default class Game {
             
             if (savedBoats.length > 0) {
                  this.boats = savedBoats.map(b => {
-                        const boat = new Boat(b.x, b.y, b.owner || 'player');
+                        const boat = new Boat(b.x, b.y, b.owner || 'player', b.subtype || 'sloop');
                         boat.hp = b.hp;
                         return boat;
                     });
@@ -263,7 +262,6 @@ export default class Game {
             const clickedTile = this.world.getTile(gx, gy);
             const cannon = this.cannons.find(c => { const [cx, cy] = c.key.split(',').map(Number); return gx === cx && gy === cy; });
             
-            // Cannon Refill Logic
             if (cannon) {
                 let requiredId = null;
                 if (clickedTile === TILES.TOWER_BASE_STONE.id) requiredId = TILES.GREY.id;
@@ -286,17 +284,14 @@ export default class Game {
             }
             
             if (!this.activeBlueprint) {
-                // [NEW] Repair Logic
                 if (this.player.selectedTile === TILES.WOOD.id) {
                     const currentDmg = this.world.getTileDamage(gx, gy);
                     const tileId = this.world.getTile(gx, gy);
                     const def = ID_TO_TILE[tileId];
 
-                    // Only repair things that have HP and are currently damaged
                     if (def && def.hp && currentDmg > 0) {
                          if (this.player.inventory[TILES.WOOD.id] >= CONFIG.REPAIR.COST || this.godMode) {
                              if (!this.godMode) this.player.inventory[TILES.WOOD.id] -= CONFIG.REPAIR.COST;
-                             // Apply negative damage (healing)
                              this.applyDamageToTile(gx, gy, -CONFIG.REPAIR.AMOUNT);
                              this.ui.update();
                              return;
@@ -307,7 +302,6 @@ export default class Game {
                     }
                 }
 
-                // Gate Toggle Logic
                 if ((clickedTile === TILES.WOOD_WALL.id || clickedTile === TILES.WOOD_WALL_OPEN.id) && 
                     Utils.distance(this.player, {x: mx, y: my}) < 120) {
                     const newId = (clickedTile === TILES.WOOD_WALL.id) ? TILES.WOOD_WALL_OPEN.id : TILES.WOOD_WALL.id;
@@ -320,12 +314,18 @@ export default class Game {
                     return;
                 }
 
-                // Building/Attacking
                 const sel = this.player.selectedTile;
                 if (!sel) {
                     this.throwProjectile(mx, my);
                     return;
                 }
+
+                // [FIX] Prevent placement if inventory is empty
+                if (!this.godMode && (this.player.inventory[sel] || 0) <= 0) {
+                    this.spawnText(mx, my, "NO RESOURCE", "#f00");
+                    return;
+                }
+
                 const tileDef = ID_TO_TILE[sel];
                 
                 if (tileDef.solid && this.isTileOccupied(gx, gy)) { 
@@ -349,15 +349,17 @@ export default class Game {
                 }
                 
                 if (affordable) {
-                    if (this.activeBlueprint.special === 'boat') {
+                    if (this.activeBlueprint.special === 'boat' || this.activeBlueprint.special === 'galleon') {
                         if (![TILES.WATER.id, TILES.DEEP_WATER.id].includes(this.world.getTile(gx, gy))) return;
                         if (!this.godMode) for (let [id, qty] of Object.entries(costMap)) this.player.inventory[id] -= qty;
                         
+                        const subtype = this.activeBlueprint.special === 'galleon' ? 'galleon' : 'sloop';
+                        
                         if (this.network.isHost) {
-                             this.boats.push(new Boat(gx*32+16, gy*32+16));
+                             this.boats.push(new Boat(gx*32+16, gy*32+16, 'player', subtype));
                              this.spawnParticles(gx*32+16, gy*32+16, '#8B4513', 8);
                         } else {
-                             this.network.actions.sendEntReq({ act: 'spawnBoat', x: gx*32+16, y: gy*32+16 });
+                             this.network.actions.sendEntReq({ act: 'spawnBoat', x: gx*32+16, y: gy*32+16, type: subtype });
                         }
                     } else {
                         let built = false;
@@ -378,6 +380,12 @@ export default class Game {
 
         } else if (this.input.mouse.clickedRight) {
             
+            // [FIX] Hide Menus on Right Click
+            const bpMenu = document.getElementById('blueprint-menu');
+            const wpMenu = document.getElementById('weapon-menu');
+            if (bpMenu) bpMenu.style.display = 'none';
+            if (wpMenu) wpMenu.style.display = 'none';
+
             if (this.activeBlueprint || this.player.selectedTile) {
                 this.activeBlueprint = null;
                 this.player.selectedTile = null;
@@ -390,15 +398,17 @@ export default class Game {
                 const clickedTile = this.world.getTile(gx, gy);
                 const allowed = [TILES.GRASS.id, TILES.SAND.id, TILES.GREY.id, TILES.WOOD_RAIL.id];
                 if (allowed.includes(clickedTile) && Utils.distance(this.player, {x:mx, y:my}) < 100) {
-                     const newBoat = new Boat(this.player.x, this.player.y);
+                     const currentType = this.player.subtype || 'sloop';
+                     const newBoat = new Boat(this.player.x, this.player.y, 'player', currentType);
                      newBoat.hp = this.player.hp;
                      this.player.hp = this.player.storedHp || 100;
                      this.player.inBoat = false;
+                     this.player.subtype = null;
                      this.player.x = gx*32+16; 
                      this.player.y = gy*32+16;
                      
                      if(this.network.isHost) this.boats.push(newBoat);
-                     else this.network.actions.sendEntReq({ act: 'spawnBoat', x: newBoat.x, y: newBoat.y });
+                     else this.network.actions.sendEntReq({ act: 'spawnBoat', x: newBoat.x, y: newBoat.y, type: currentType });
                      return;
                 }
             } else {
@@ -408,6 +418,7 @@ export default class Game {
                      this.player.storedHp = this.player.hp;
                      this.player.hp = boat.hp;
                      this.player.inBoat = true;
+                     this.player.subtype = boat.subtype;
                      this.player.x = boat.x; 
                      this.player.y = boat.y;
                      this.player.boatStats = boat.boatStats;
@@ -511,9 +522,12 @@ export default class Game {
 
         let dmg = 0;
         const meleeId = this.player.activeMelee;
-        if (meleeId === TILES.SWORD_IRON.id) dmg = 90;
-        else if (meleeId === TILES.SWORD_WOOD.id) dmg = 50;
+        
+        // [FIX] Use damage values from WEAPONS config instead of hardcoded
+        if (meleeId === TILES.SWORD_IRON.id) dmg = WEAPONS.SWORD_IRON.damage;
+        else if (meleeId === TILES.SWORD_WOOD.id) dmg = WEAPONS.SWORD_WOOD.damage;
         else if (meleeId === 'hand') dmg = 5; 
+        
         if (dmg === 0) return;
 
         const targets = [...this.npcs, ...this.animals];
@@ -586,7 +600,6 @@ export default class Game {
         if (entity === this.player && this.godMode) return;
         if (isNaN(damage)) return; 
 
-        // [NEW] Reset Peace Timer on Player Damage
         if (this.network.isHost && (entity.type === 'player' || entity.type === 'peer')) {
             this.peaceTimer = 0;
         }
@@ -610,12 +623,10 @@ export default class Game {
         const tileId = this.world.getTile(gx, gy);
         const tileDef = ID_TO_TILE[tileId];
 
-        // [NEW] Handle Healing (Negative Damage)
         if (damage < 0) {
             if (this.network.isHost) {
                  this.world.hitTile(gx, gy, damage);
                  
-                 // Clean up tileData if fully healed (dmg <= 0)
                  if (this.world.getTileDamage(gx, gy) <= 0) {
                      delete this.world.tileData[`${gx},${gy}`];
                  }
@@ -759,7 +770,6 @@ export default class Game {
                 c.ammo--;
                 c.cooldown = 60; 
                 
-                // [FIX] Pass c.key (grid coordinates) as ownerId to prevent self-damage
                 const proj = new Projectile(c.x, c.y - 20, target.x, target.y, c.damage, 10, '#000', true, 'cannonball', c.key);
                 this.projectiles.push(proj);
                 this.spawnParticles(c.x, c.y - 10, '#888', 3);
@@ -781,7 +791,6 @@ export default class Game {
     updateHostAI(dt) {
          if (!this.network.isHost) return;
         
-         // [NEW] Handle Peace Timer Logic
          this.handlePeaceTimer(dt);
 
          if (this.animals.length < 10 && Math.random() < 0.005) {
@@ -829,7 +838,6 @@ export default class Game {
          });
     }
 
-    // [NEW] Check timer and spawn additional ship if peace is broken
     handlePeaceTimer(dt) {
         this.peaceTimer += dt;
         if (this.peaceTimer >= this.peaceThreshold) {
@@ -839,7 +847,6 @@ export default class Game {
                 this.spawnText(enemyBoat.x, enemyBoat.y, "PEACE BROKEN!", "#ff0000");
                 this.showMessage("A NEW ENEMY APPROACHES", "#f00");
                 
-                // [FIX] Clear the message after 4 seconds
                 if (this.peaceMsgTimer) clearTimeout(this.peaceMsgTimer);
                 this.peaceMsgTimer = setTimeout(() => {
                     this.showMessage("", "#fff");
@@ -924,9 +931,6 @@ export default class Game {
             const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
             const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
             
-            // [FIX] Prevent self-damage: 
-            // If the current tile coordinate matches the projectile's ownerId (which is "x,y" string), 
-            // ignore collision with this tile.
             if (p.ownerId === `${gx},${gy}`) return;
 
             const tileId = this.world.getTile(gx, gy);
@@ -1047,7 +1051,7 @@ export default class Game {
                 boatStats: this.player.boatStats
             },
             world: this.world.exportData(),
-            boats: this.boats.map(b => ({ x: b.x, y: b.y, hp: b.hp, owner: b.owner })),
+            boats: this.boats.map(b => ({ x: b.x, y: b.y, hp: b.hp, owner: b.owner, subtype: b.subtype })),
             invasion: { timer: this.invasionTimer, next: this.nextInvasionTime },
             deathCount: this.deathCount
         };

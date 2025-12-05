@@ -4,7 +4,7 @@ A multiplayer top-down sandbox survival game built with vanilla JavaScript and H
 
 ## 🎮 How to Run
 
-Play the latest version at: https://ipfs.io/ipfs/bafybeidg65u5cjtsw5ghy43a4hwgf3iuonuzwltsvfataqsbwwpxh4hhku/
+Play the latest version at: https://ipfs.io/ipfs/bafybeiakaqjd5otpozwa6hpwx326k4epud72ewep2ookwkrxvubs5qdz4u/
 
 Because this project uses ES6 Modules, you cannot simply open `index.html` directly. You must use a local server.
 
@@ -67,11 +67,7 @@ Because this project uses ES6 Modules, you cannot simply open `index.html` direc
 
 ## TODO
 - joining player might spawn in water if host is next to water
-- allow building stronger ship with much more HP
 - balance building costs according to drop rates
-- boats should have ammo
-
-
 
 
 

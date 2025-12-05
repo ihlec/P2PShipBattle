@@ -1,7 +1,7 @@
 body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Courier New', Courier, monospace; color: #eee; user-select: none; }
 canvas { display: block; image-rendering: pixelated; }
 
-/* [MODIFIED] UI Layer Layout for Split Stats */
+/* UI Layer Layout for Split Stats */
 #ui-layer { 
     position: absolute; 
     top: 0; 

@@ -1,4 +1,4 @@
-import { CONFIG, TILES, ID_TO_TILE } from '../config.js';
+import { CONFIG, TILES, ID_TO_TILE, SHIP_SPECS } from '../config.js';
 import Utils from '../utils.js';
 import { Projectile } from './Projectile.js';
 
@@ -34,6 +34,7 @@ export class Entity {
         
         // Boat State
         this.inBoat = false;
+        this.subtype = null; // Track which ship type the entity is on
         this.boatStats = {
             heading: 0,
             targetHeading: 0,
@@ -97,7 +98,10 @@ export class Entity {
 
     updateBoatMovement(input, deltaTime, world, game) {
         const stats = this.boatStats;
-        const config = CONFIG.BOAT;
+        
+        // [FIX] Load specific ship specs based on subtype (Sloop vs Galleon)
+        const subtype = this.subtype || 'sloop';
+        const specs = SHIP_SPECS[subtype] || SHIP_SPECS['sloop'];
 
         // Cooldowns
         if (stats.cooldownLeft > 0) stats.cooldownLeft--;
@@ -110,19 +114,21 @@ export class Entity {
             input.down = false;
         }
 
-        // Rudder
-        if (input.left) stats.rudder -= config.RUDDER_SPEED;
-        if (input.right) stats.rudder += config.RUDDER_SPEED;
+        // Rudder - Use specs.turnSpeed
+        if (input.left) stats.rudder -= specs.turnSpeed;
+        if (input.right) stats.rudder += specs.turnSpeed;
         
-        // Clamp Rudder
-        stats.rudder = Math.max(-config.MAX_RUDDER, Math.min(config.MAX_RUDDER, stats.rudder));
+        // Clamp Rudder - Use Global Config or Spec Max
+        // Note: Using CONFIG.BOAT.MAX_RUDDER ensures we don't exceed the global clamp
+        stats.rudder = Math.max(-CONFIG.BOAT.MAX_RUDDER, Math.min(CONFIG.BOAT.MAX_RUDDER, stats.rudder));
 
         // Auto-center Rudder
         if (!input.left && !input.right) stats.rudder *= 0.95;
 
         // Apply Heading Change
         if (Math.abs(stats.rudder) > 0.001) {
-            stats.heading += stats.rudder * (config.TURN_FACTOR * 0.25);
+            // [FIX] Reduced rotation speed multiplier to 0.01 for heavy feel
+            stats.heading += stats.rudder * (CONFIG.BOAT.TURN_FACTOR * 0.01);
         }
 
         // Wind Physics
@@ -136,11 +142,11 @@ export class Entity {
         if (input.up) stats.sailLevel = Math.min(1, stats.sailLevel + 0.02);
         else if (input.down) stats.sailLevel = Math.max(-0.25, stats.sailLevel - 0.05);
 
-        // Calculate Acceleration
+        // Calculate Acceleration - Use specs.acceleration
         const powerFactor = 0.40;
         let effectiveThrust = 0;
-        if (stats.sailLevel > 0) effectiveThrust = stats.sailLevel * config.ACCELERATION * powerFactor * windEfficiency;
-        else effectiveThrust = stats.sailLevel * config.ACCELERATION * 0.2;
+        if (stats.sailLevel > 0) effectiveThrust = stats.sailLevel * specs.acceleration * powerFactor * windEfficiency;
+        else effectiveThrust = stats.sailLevel * specs.acceleration * 0.2;
 
         const accX = Math.cos(stats.heading) * effectiveThrust;
         const accY = Math.sin(stats.heading) * effectiveThrust;
@@ -152,13 +158,21 @@ export class Entity {
         this.velocity.x *= 0.995;
         this.velocity.y *= 0.995;
 
+        // [FIX] Apply Max Speed Cap from Specs
+        const currentSpeed = Math.sqrt(this.velocity.x**2 + this.velocity.y**2);
+        // Normalize 1 unit of velocity ~ 15 pixels/frame visual speed
+        const maxVel = specs.maxSpeed / 15.0; 
+        if (currentSpeed > maxVel) {
+            this.velocity.x = (this.velocity.x / currentSpeed) * maxVel;
+            this.velocity.y = (this.velocity.y / currentSpeed) * maxVel;
+        }
+
         // Apply Drift/Keel Physics (Boats don't slide sideways easily)
-        const speed = Math.sqrt(this.velocity.x ** 2 + this.velocity.y ** 2);
-        if (speed > 0.001) {
+        if (currentSpeed > 0.001) {
             const moveAngle = Math.atan2(this.velocity.y, this.velocity.x);
             const angleDiff = moveAngle - stats.heading;
-            const forwardSpeed = Math.cos(angleDiff) * speed;
-            const lateralSpeed = Math.sin(angleDiff) * speed;
+            const forwardSpeed = Math.cos(angleDiff) * currentSpeed;
+            const lateralSpeed = Math.sin(angleDiff) * currentSpeed;
             
             const newForward = forwardSpeed;
             const newLateral = lateralSpeed * 0.90; // High lateral drag
@@ -305,27 +319,39 @@ export class Entity {
         // Check Cooldown
         if (stats[cooldownKey] > 0) return;
 
-        // [NEW] Check Ammo (Stone) for Player
+        // [FIX] Dynamic Ammo Type
+        const subtype = this.subtype || 'sloop';
+        const specs = SHIP_SPECS[subtype] || SHIP_SPECS['sloop'];
+        const ammoId = (specs.ammoType === 'IRN') ? TILES.IRON.id : TILES.GREY.id;
+        const ammoName = (specs.ammoType === 'IRN') ? "IRON" : "STONE";
+
+        // Check Ammo for Player
         if (this.type === 'player' && !game.godMode) {
-            if ((this.inventory[TILES.GREY.id] || 0) < 1) {
-                game.spawnText(this.x, this.y - 20, "NO AMMO", "#f00");
+            if ((this.inventory[ammoId] || 0) < 1) {
+                game.spawnText(this.x, this.y - 20, `NO ${ammoName}`, "#f00");
+                stats[cooldownKey] = 60; // [FIX] Prevent spamming "No Ammo" (1 sec delay)
                 return;
             }
             // Consume Ammo
-            this.inventory[TILES.GREY.id]--;
+            this.inventory[ammoId]--;
             game.ui.update();
         }
 
         // Reset Cooldown
-        stats[cooldownKey] = config.BROADSIDE_COOLDOWN;
+        stats[cooldownKey] = specs.broadsideCooldown; // [FIXED] Changed 'this.specs' to 'specs' to avoid TypeError
 
         // Calculate firing angle (Left = -90deg, Right = +90deg)
         const offsetAngle = side === 'left' ? -Math.PI / 2 : Math.PI / 2;
         const baseAngle = stats.heading + offsetAngle;
 
-        // Fire a volley of 3 cannonballs
-        for (let i = -1; i <= 1; i++) {
-            const spread = i * 0.15; // Spread in radians
+        // [FIX] Determine shot count based on ship type
+        // Sloop = 2, Galleon = 3
+        const shotCount = (subtype === 'galleon') ? 3 : 2;
+
+        for (let i = 0; i < shotCount; i++) {
+            // Calculate spread centered around the base angle
+            const spreadFactor = i - (shotCount - 1) / 2;
+            const spread = spreadFactor * 0.15; // Spread in radians
             const fireAngle = baseAngle + spread;
 
             // Start position (offset to the side of the ship)
@@ -343,8 +369,8 @@ export class Entity {
             const p = new Projectile(
                 sx, sy, 
                 tx, ty, 
-                config.CANNON_DAMAGE, 
-                config.CANNON_SPEED, 
+                CONFIG.BOAT.CANNON_DAMAGE, 
+                CONFIG.BOAT.CANNON_SPEED, 
                 '#111', 
                 isPlayer, 
                 'cannonball',

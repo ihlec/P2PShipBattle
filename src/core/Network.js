@@ -17,16 +17,15 @@ export default class Network {
         this.lastPlayerSyncTime = 0; 
         this.hostId = null; 
         
-        // [UPDATED] Expanded tracker list for reliability and parallel requests
         const config = { 
             appId: 'pixel-warfare-v2',
             trackerUrls: [
-                'wss://tracker.openwebtorrent.com',      // Primary
-                'wss://tracker.btorrent.xyz',            // Secondary
-                'wss://tracker.webtorrent.dev',          // Original (often unstable)
-                'wss://tracker.files.fm:7073/announce',  // Backup 1
-                'wss://qot.somnolescent.net',            // Backup 2
-                'wss://tracker.sigterm.xyz'              // Backup 3
+                'wss://tracker.openwebtorrent.com',      
+                'wss://tracker.btorrent.xyz',            
+                'wss://tracker.webtorrent.dev',          
+                'wss://tracker.files.fm:7073/announce',  
+                'wss://qot.somnolescent.net',            
+                'wss://tracker.sigterm.xyz'              
             ]
         };
         this.room = joinRoom(config, roomId);
@@ -130,13 +129,15 @@ export default class Network {
                 } else if (data.bh !== undefined) {
                     peer.boatStats = { heading: data.bh, targetHeading: data.bh };
                 }
+                peer.subtype = data.st || 'sloop';
             } else {
                 this.game.peers[peerId] = { 
                     id: peerId, type: 'peer', name: "Player",
                     x: data.x, y: data.y, targetX: data.x, targetY: data.y,
                     hp: data.hp, maxHp: 100,
                     activeMelee: data.w, inBoat: data.b,
-                    isMoving: data.mv, moveTime: 0, direction: {x:0, y:1}
+                    isMoving: data.mv, moveTime: 0, direction: {x:0, y:1},
+                    subtype: data.st || 'sloop'
                 };
                 if (data.bh !== undefined) {
                     this.game.peers[peerId].boatStats = { heading: data.bh, targetHeading: data.bh };
@@ -205,7 +206,8 @@ export default class Network {
         getEntReq((data, peerId) => {
             if (this.isHost) {
                 if (data.act === 'spawnBoat') {
-                    const b = new Boat(data.x, data.y);
+                    const subtype = data.type || 'sloop';
+                    const b = new Boat(data.x, data.y, 'player', subtype);
                     this.game.boats.push(b);
                 } else if (data.act === 'enterBoat') {
                     const idx = this.game.boats.findIndex(b => b.id === data.id);
@@ -299,7 +301,7 @@ export default class Network {
             if (!t) {
                 if (type === 'npc') { t = new Entity(s.x, s.y, 'npc'); t.id = s.i; targetArray.push(t); }
                 else if (type === 'sheep') { t = new Sheep(s.x, s.y); t.id = s.i; targetArray.push(t); }
-                else if (type === 'boat') { t = new Boat(s.x, s.y, s.o); t.id = s.i; targetArray.push(t); }
+                else if (type === 'boat') { t = new Boat(s.x, s.y, s.o, s.st || 'sloop'); t.id = s.i; targetArray.push(t); }
             }
             if (t) {
                 t.targetX = s.x; t.targetY = s.y; t.hp = s.h;
@@ -309,6 +311,7 @@ export default class Network {
                     t.boatStats.targetHeading = s.bs.h;
                     t.boatStats.heading = s.bs.h; 
                 }
+                if (s.st) t.subtype = s.st;
             }
         });
         for (let i = targetArray.length - 1; i >= 0; i--) {
@@ -340,7 +343,6 @@ export default class Network {
     update(deltaTime) {
         const now = Date.now();
         
-        // Stable 50ms sync rate instead of random chance
         if (now - this.lastPlayerSyncTime > 50) { 
             this.lastPlayerSyncTime = now;
             this.actions.sendPlayer({
@@ -350,7 +352,8 @@ export default class Network {
                 b: this.game.player.inBoat,
                 hp: Math.floor(this.game.player.hp),
                 mv: this.game.player.isMoving,
-                bh: this.game.player.inBoat ? Number(this.game.player.boatStats.heading.toFixed(2)) : 0
+                bh: this.game.player.inBoat ? Number(this.game.player.boatStats.heading.toFixed(2)) : 0,
+                st: this.game.player.subtype || 'sloop'
             });
         }
         
@@ -359,7 +362,15 @@ export default class Network {
                  this.lastEntitySyncTime = now;
                  const n = this.game.npcs.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp }));
                  const a = this.game.animals.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
-                 const b = this.game.boats.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, o: e.owner, bs: { h: Number(e.boatStats.heading.toFixed(2)) } }));
+                 const b = this.game.boats.map(e => ({ 
+                     i: e.id, 
+                     x: Number(e.x.toFixed(1)), 
+                     y: Number(e.y.toFixed(1)), 
+                     h: e.hp, 
+                     o: e.owner, 
+                     st: e.subtype, // Sync Ship Type
+                     bs: { h: Number(e.boatStats.heading.toFixed(2)) } 
+                 }));
                  const l = this.game.loot.map(e => ({ i: e.uid, x: Math.floor(e.x), y: Math.floor(e.y), t: e.id, q: e.qty }));
                  
                  this.actions.sendEntities({ n, a, b, l, t: Number(this.game.world.time.toFixed(4)) });

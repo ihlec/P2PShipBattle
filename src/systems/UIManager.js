@@ -130,45 +130,34 @@ export default class UIManager {
                 }
                 this.game.player.inventory[wp.id] = (this.game.player.inventory[wp.id] || 0) + 1;
                 this.game.showMessage(`Crafted ${wp.name}!`, '#fff');
-                this.toggleWeapons();
                 this.update(); 
             };
             this.dom.wpnMenu.appendChild(div);
         });
     }
 
-    // [NEW] Helper to render structures exactly as they appear in game
     renderIconToCanvas(ctx, id) {
         const tile = ID_TO_TILE[id];
         const ts = 32;
 
         if (tile.isTower) {
-            // Draw Tower Logic (Ported from Renderer)
             ctx.fillStyle = '#222';
-            ctx.fillRect(0, 0, ts, ts); // Background shadow
-            
+            ctx.fillRect(0, 0, ts, ts); 
             ctx.fillStyle = tile.color;
-            ctx.fillRect(0, 4, ts, ts); // Main body shifted down slightly for icon
-            
-            // Details
+            ctx.fillRect(0, 4, ts, ts); 
             ctx.fillStyle = 'rgba(0,0,0,0.1)';
             ctx.fillRect(4, 12, ts - 8, 2);
             ctx.fillRect(4, 24, ts - 8, 2);
-            
             ctx.fillStyle = '#111';
-            ctx.fillRect(ts / 2 - 2, 14, 4, 12); // Slit
+            ctx.fillRect(ts / 2 - 2, 14, 4, 12); 
             
-            // Top Turret
-            const topY = -8 + 4; // Shifted
+            const topY = -8 + 4; 
             ctx.fillStyle = (id === TILES.TOWER_BASE_GOLD.id ? '#FDD835' : (id === TILES.TOWER_BASE_IRON.id ? '#555' : '#888'));
             ctx.fillRect(-2, topY, ts + 4, ts); 
             
-            // Battlements
             ctx.fillStyle = tile.color;
             ctx.fillRect(0, topY - 4, 6, 6);
             ctx.fillRect(ts - 6, topY - 4, 6, 6);
-            
-            // Center the view for the icon
             return;
         }
 
@@ -187,7 +176,6 @@ export default class UIManager {
 
         if (id === TILES.WOOD_WALL.id || id === TILES.WOOD_WALL_OPEN.id) {
             ctx.fillStyle = '#5C3317';
-            // Closed Fence Look
             ctx.fillRect(4, 4, 6, ts - 4);
             ctx.fillRect(22, 4, 6, ts - 4);
             ctx.fillRect(0, 8, ts, 4);
@@ -201,7 +189,6 @@ export default class UIManager {
         if (id === TILES.ROAD.id) {
             ctx.fillStyle = '#4a4a4a'; 
             ctx.fillRect(0, 0, ts, ts);
-            // Simple cobblestone pattern
             ctx.fillStyle = '#555';
             ctx.fillRect(2, 2, 12, 12);
             ctx.fillRect(16, 2, 12, 12);
@@ -211,23 +198,38 @@ export default class UIManager {
         }
 
         if (id === TILES.BOAT.id) {
-            // Simplified Boat Top-Down
             ctx.fillStyle = '#5D4037';
             ctx.beginPath();
             ctx.ellipse(16, 16, 8, 14, 0, 0, Math.PI*2);
             ctx.fill();
-            ctx.fillStyle = '#3E2723'; // Mast
+            ctx.fillStyle = '#3E2723'; 
             ctx.beginPath();
             ctx.arc(16, 16, 3, 0, Math.PI*2);
             ctx.fill();
-            // Sail
             ctx.fillStyle = '#eee';
             ctx.fillRect(8, 14, 16, 4);
             return;
         }
+        
+        // Galleon Icon
+        if (id === TILES.GALLEON.id) {
+            ctx.fillStyle = '#5D4037';
+            ctx.beginPath();
+            ctx.ellipse(16, 16, 10, 16, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#3E2723'; 
+            ctx.beginPath();
+            ctx.arc(16, 10, 3, 0, Math.PI*2); // Mast 1
+            ctx.arc(16, 22, 3, 0, Math.PI*2); // Mast 2
+            ctx.fill();
+            ctx.fillStyle = '#eee';
+            ctx.fillRect(6, 8, 20, 4);
+            ctx.fillRect(6, 20, 20, 4);
+            return;
+        }
 
         if (id === TILES.TORCH.id) {
-             ctx.fillStyle = '#222'; // Floor background
+             ctx.fillStyle = '#222';
              ctx.fillRect(0,0,32,32);
              
              ctx.fillStyle = '#555';
@@ -239,11 +241,9 @@ export default class UIManager {
              return;
         }
 
-        // Default Block (Bridge, etc)
         ctx.fillStyle = tile.color;
         ctx.fillRect(0, 0, ts, ts);
         
-        // Add a border to make it look like a block
         ctx.strokeStyle = 'rgba(0,0,0,0.2)';
         ctx.lineWidth = 2;
         ctx.strokeRect(0, 0, ts, ts);
@@ -276,12 +276,18 @@ export default class UIManager {
         // Weapon Slots
         const rSlot = document.getElementById('slot-range');
         let rIcon = ''; let rName = '';
-        const pNone = 'style="pointer-events:none"'; // Prevent inner elements from blocking clicks
+        const pNone = 'style="pointer-events:none"'; 
 
-        if (this.game.player.activeRange === TILES.GREY.id) { rIcon = `<div class="icon-boulder" ${pNone}></div>`; rName = 'Stone'; } 
-        else if (this.game.player.activeRange === TILES.SPEAR_WOOD.id) { rIcon = `<div class="icon-spear tip-black" ${pNone}></div>`; rName = 'Ob.Spr'; } 
-        else if (this.game.player.activeRange === TILES.SPEAR_IRON.id) { rIcon = `<div class="icon-spear tip-grey" ${pNone}></div>`; rName = 'Ir.Spr'; }
-        rSlot.innerHTML = `${rIcon}<div class="short-name" ${pNone}>${rName}</div>`;
+        // [MODIFIED] Added Quantity Logic
+        const rangeId = this.game.player.activeRange;
+        const rangeQty = this.game.player.inventory[rangeId] || 0;
+
+        if (rangeId === TILES.GREY.id) { rIcon = `<div class="icon-boulder" ${pNone}></div>`; rName = 'Stone'; } 
+        else if (rangeId === TILES.SPEAR_WOOD.id) { rIcon = `<div class="icon-spear tip-black" ${pNone}></div>`; rName = 'Ob.Spr'; } 
+        else if (rangeId === TILES.SPEAR_IRON.id) { rIcon = `<div class="icon-spear tip-grey" ${pNone}></div>`; rName = 'Ir.Spr'; }
+        
+        // [MODIFIED] Inject Qty
+        rSlot.innerHTML = `${rIcon}<div class="short-name" ${pNone}>${rName}</div><div class="qty">${rangeQty}</div>`;
 
         const mSlot = document.getElementById('slot-melee');
         let mIcon = ''; let mName = '';
@@ -324,12 +330,10 @@ export default class UIManager {
             this.dom.activeBp.style.display = 'none';
         }
         
-        // HUD text (Reduced)
         const px = Math.floor(this.game.player.x/CONFIG.TILE_SIZE);
         const py = Math.floor(this.game.player.y/CONFIG.TILE_SIZE);
         this.dom.coords.innerText = `${px}, ${py}`;
         
-        // Room ID
         this.dom.roomId.innerText = this.game.network.roomId || "---";
     }
 

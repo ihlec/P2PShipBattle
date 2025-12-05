@@ -1,4 +1,4 @@
-import { CONFIG, TILES, ID_TO_TILE, SHIP_LAYOUT } from '../config.js';
+import { CONFIG, TILES, ID_TO_TILE, SHIP_SPECS } from '../config.js';
 import Utils from '../utils.js';
 
 export default class Renderer {
@@ -192,7 +192,7 @@ export default class Renderer {
                     if (obj._type === 'boat') {
                         const stats = obj._orig.boatStats || { heading: 0 };
                         // [FIX] Ensure this.drawBoat is called
-                        this.drawBoat(obj.x, obj.y, stats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig);
+                        this.drawBoat(obj.x, obj.y, stats.heading, obj._orig.owner, obj._orig.hp, obj._orig.maxHp, obj._orig, obj._orig.subtype);
                     } else if (obj._type === 'loot') {
                         const gx = Math.floor(obj.x / CONFIG.TILE_SIZE);
                         const gy = Math.floor(obj.y / CONFIG.TILE_SIZE);
@@ -234,8 +234,9 @@ export default class Renderer {
                         const isPlayer = obj._type === 'player';
                         if (obj._orig.inBoat) {
                             const heading = (obj._orig.boatStats && obj._orig.boatStats.heading !== undefined) ? obj._orig.boatStats.heading : 0;
-                            
-                            this.drawBoat(obj.x, obj.y, heading, 'player', obj._orig.hp, 100, obj._orig);
+                            // Assume Sloop if not specified for players currently
+                            const subtype = obj._orig.subtype || 'sloop';
+                            this.drawBoat(obj.x, obj.y, heading, 'player', obj._orig.hp, 100, obj._orig, subtype);
                             
                             this.ctx.save();
                             this.ctx.translate(obj.x, obj.y);
@@ -516,13 +517,15 @@ export default class Renderer {
         this.ctx.fillRect(x, y, w * (Math.max(0, e.hp) / e.maxHp), h); 
     }
 
-    drawBoat(x, y, heading, owner, hp, maxHp, boatData) { 
+    drawBoat(x, y, heading, owner, hp, maxHp, boatData, subtype = 'sloop') { 
         this.ctx.save();
         this.ctx.translate(x, y);
         this.ctx.rotate(heading + Math.PI / 2);
         
-        const rows = SHIP_LAYOUT.length; 
-        const cols = SHIP_LAYOUT[0].length; 
+        const specs = SHIP_SPECS[subtype] || SHIP_SPECS['sloop'];
+        const layout = specs.layout;
+        const rows = layout.length; 
+        const cols = layout[0].length; 
         const ts = 16;
         const width = cols * ts;
         const height = rows * ts;
@@ -553,15 +556,12 @@ export default class Renderer {
         const hpPct = hp / maxHp;
         if (hpPct < 0.5) {
              const time = Date.now();
-             
-             // Volumetric Smoke Effect
              for(let i=0; i<5; i++) {
                  const cycleDuration = 1000;
                  const offset = i * (cycleDuration / 5);
                  const t = (time + offset) % cycleDuration;
-                 const pct = t / cycleDuration; // 0 to 1
+                 const pct = t / cycleDuration;
                  
-                 // Physics: drift "back" (down in local Y) and expanding
                  const driftY = pct * 15; 
                  const driftX = Math.sin(t * 0.005) * 5;
                  const size = 4 + pct * 6;
@@ -574,7 +574,6 @@ export default class Renderer {
              }
              
              if (hpPct < 0.25) {
-                // Fire (Flickering core)
                 const flicker = (Math.random() > 0.5) ? '#ff4400' : '#ffaa00';
                 this.ctx.fillStyle = flicker;
                 this.ctx.beginPath();
@@ -587,7 +586,7 @@ export default class Renderer {
         
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-                const type = SHIP_LAYOUT[r][c];
+                const type = layout[r][c];
                 const dx = startX + c * ts;
                 const dy = startY + r * ts;
                 
@@ -609,86 +608,29 @@ export default class Renderer {
                      this.ctx.lineWidth = 2;
                      this.ctx.stroke();
                 } else if (type === 42) { 
-                    mastX = dx + ts / 2;
-                    mastY = dy + ts / 2;
-                    hasMast = true;
+                    // Draw Mast base
+                    this.ctx.fillStyle = '#3E2723';
+                    this.ctx.fillRect(dx + 4, dy + 4, ts - 8, ts - 8);
+
+                    // Find Main Mast (the one closest to center usually, but any will do for sail drawing)
+                    // We'll just draw sails for ALL masts we find
+                    this.drawSail(dx + ts/2, dy + ts/2, heading, owner);
+                } else if (type === 43) {
+                    // Draw Cannon
+                    const isLeft = (c < cols/2);
+                    const side = isLeft ? -1 : 1;
+                    this.drawCannon(dx + ts/2, dy + ts/2, side);
                 }
             }
-        }
-
-        const cannonYPositions = [startY + ts * 1.8, startY + ts * 3, startY + ts * 4.2];
-        
-        this.ctx.fillStyle = '#111'; 
-        const drawCannon = (cx, cy, side) => { 
-            this.ctx.save();
-            this.ctx.translate(cx, cy);
-            if (side === -1) this.ctx.rotate(-Math.PI/2);
-            else this.ctx.rotate(Math.PI/2);
-            
-            this.ctx.fillStyle = '#3E2723';
-            this.ctx.fillRect(-3, -3, 6, 6);
-            
-            this.ctx.fillStyle = '#111';
-            this.ctx.beginPath();
-            this.ctx.moveTo(-2, -2);
-            this.ctx.lineTo(2, -2);
-            this.ctx.lineTo(3, 8); 
-            this.ctx.lineTo(-3, 8);
-            this.ctx.closePath();
-            this.ctx.fill();
-            this.ctx.restore();
-        };
-
-        cannonYPositions.forEach(cy => {
-            drawCannon(startX + 4, cy, -1); 
-            drawCannon(startX + width - 4, cy, 1); 
-        });
-
-        if (hasMast) {
-            this.ctx.save();
-            this.ctx.translate(mastX, mastY);
-            
-            let windAngle = this.game.world.wind.angle;
-            let boatAngle = heading + Math.PI/2;
-            let relWind = windAngle - boatAngle;
-            
-            while (relWind <= -Math.PI) relWind += Math.PI*2;
-            while (relWind > Math.PI) relWind -= Math.PI*2;
-
-            let sailAngle = relWind * 0.8; 
-            sailAngle = Math.max(-Math.PI/2, Math.min(Math.PI/2, sailAngle));
-
-            this.ctx.rotate(sailAngle);
-            
-            this.ctx.fillStyle = '#5D4037'; 
-            this.ctx.fillRect(-24, -2, 48, 4);
-            
-            const fullness = 10 + Math.sin(Date.now() / 200) * 2; 
-            this.ctx.fillStyle = owner === 'enemy' ? '#222' : '#eee'; 
-            this.ctx.beginPath();
-            this.ctx.moveTo(-22, 0);
-            this.ctx.quadraticCurveTo(0, -fullness - 20, 22, 0); 
-            this.ctx.lineTo(22, 2);
-            this.ctx.quadraticCurveTo(0, -fullness - 18, -22, 2);
-            this.ctx.fill();
-            
-            this.ctx.fillStyle = '#3E2723';
-            this.ctx.beginPath();
-            this.ctx.arc(0, 0, 4, 0, Math.PI * 2);
-            this.ctx.fill();
-
-            this.ctx.restore();
         }
         
         // Reload Indicators
         if (boatData && boatData.boatStats) {
              const stats = boatData.boatStats;
-             const maxCd = CONFIG.BOAT.BROADSIDE_COOLDOWN;
-             
-             // Draw Bars
+             const maxCd = specs.broadsideCooldown;
              const drawBar = (pct, xOff) => {
                  if (pct >= 0.99) return; // Full
-                 const h = 40;
+                 const h = height;
                  const w = 4;
                  const fillH = h * pct;
                  this.ctx.fillStyle = '#333';
@@ -696,13 +638,68 @@ export default class Renderer {
                  this.ctx.fillStyle = '#ff0';
                  this.ctx.fillRect(xOff, -h/2 + (h-fillH), w, fillH);
              };
-
              if (stats.cooldownLeft > 0) drawBar(1 - (stats.cooldownLeft/maxCd), -width/2 - 8);
              if (stats.cooldownRight > 0) drawBar(1 - (stats.cooldownRight/maxCd), width/2 + 4);
         }
 
         this.ctx.restore();
         this.drawHealth({ x, y, hp, maxHp }); 
+    }
+
+    drawCannon(cx, cy, side) { 
+        this.ctx.save();
+        this.ctx.translate(cx, cy);
+        if (side === -1) this.ctx.rotate(-Math.PI/2);
+        else this.ctx.rotate(Math.PI/2);
+        
+        this.ctx.fillStyle = '#3E2723';
+        this.ctx.fillRect(-3, -3, 6, 6);
+        
+        this.ctx.fillStyle = '#111';
+        this.ctx.beginPath();
+        this.ctx.moveTo(-2, -2);
+        this.ctx.lineTo(2, -2);
+        this.ctx.lineTo(3, 8); 
+        this.ctx.lineTo(-3, 8);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.restore();
+    }
+
+    drawSail(mastX, mastY, heading, owner) {
+        this.ctx.save();
+        this.ctx.translate(mastX, mastY);
+        
+        let windAngle = this.game.world.wind.angle;
+        let boatAngle = heading + Math.PI/2;
+        let relWind = windAngle - boatAngle;
+        
+        while (relWind <= -Math.PI) relWind += Math.PI*2;
+        while (relWind > Math.PI) relWind -= Math.PI*2;
+
+        let sailAngle = relWind * 0.8; 
+        sailAngle = Math.max(-Math.PI/2, Math.min(Math.PI/2, sailAngle));
+
+        this.ctx.rotate(sailAngle);
+        
+        this.ctx.fillStyle = '#5D4037'; 
+        this.ctx.fillRect(-24, -2, 48, 4);
+        
+        const fullness = 10 + Math.sin(Date.now() / 200) * 2; 
+        this.ctx.fillStyle = owner === 'enemy' ? '#222' : '#eee'; 
+        this.ctx.beginPath();
+        this.ctx.moveTo(-22, 0);
+        this.ctx.quadraticCurveTo(0, -fullness - 20, 22, 0); 
+        this.ctx.lineTo(22, 2);
+        this.ctx.quadraticCurveTo(0, -fullness - 18, -22, 2);
+        this.ctx.fill();
+        
+        this.ctx.fillStyle = '#3E2723';
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        this.ctx.restore();
     }
 
     drawSheep(obj) { 
