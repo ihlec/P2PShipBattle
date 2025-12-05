@@ -288,7 +288,7 @@ export class Entity {
                 
                 game.spawnParticles(t.x, t.y, '#f00', 8);
                 game.spawnText(t.x, t.y, "RAM!", "#ff0000");
-                game.triggerShake(10); // [NEW] Shake
+                game.triggerShake(10); 
 
                 return; 
             }
@@ -302,7 +302,19 @@ export class Entity {
         const config = CONFIG.BOAT;
         const cooldownKey = side === 'left' ? 'cooldownLeft' : 'cooldownRight';
 
+        // Check Cooldown
         if (stats[cooldownKey] > 0) return;
+
+        // [NEW] Check Ammo (Stone) for Player
+        if (this.type === 'player' && !game.godMode) {
+            if ((this.inventory[TILES.GREY.id] || 0) < 1) {
+                game.spawnText(this.x, this.y - 20, "NO AMMO", "#f00");
+                return;
+            }
+            // Consume Ammo
+            this.inventory[TILES.GREY.id]--;
+            game.ui.update();
+        }
 
         // Reset Cooldown
         stats[cooldownKey] = config.BROADSIDE_COOLDOWN;
@@ -336,7 +348,7 @@ export class Entity {
                 '#111', 
                 isPlayer, 
                 'cannonball',
-                this.id // [FIX] Added ownerId so projectiles don't hit the boat that fired them
+                this.id // OwnerId to prevent self-damage
             );
             
             p.life = config.CANNON_RANGE; 
@@ -355,6 +367,6 @@ export class Entity {
         
         // Recoil Effect
         game.spawnParticles(this.x, this.y, '#888', 8);
-        game.triggerShake(4); // [NEW] Shake
+        game.triggerShake(4); 
     }
 }
