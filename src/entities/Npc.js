@@ -64,23 +64,38 @@ export class Raider extends Entity {
         if (this.attackCooldown > 0) this.attackCooldown--;
 
         // 1. Target Acquisition
-        // [MODIFIED] Reduced timer from 60 to 10 to ensure they "always" switch to the closest target quickly
         this.searchTimer--;
         if (this.searchTimer <= 0 || (this.target && this.target.obj.hp <= 0)) {
             this.target = this.findTarget(game, world);
             this.searchTimer = 10; 
         }
 
+        // [NEW] Separation Force (Prevent Stacking)
+        let sepX = 0;
+        let sepY = 0;
+        if (game && game.npcs) {
+            const separationRadius = 24; // Distance to maintain between units
+            game.npcs.forEach(other => {
+                if (other !== this && other.hp > 0 && other.type === 'npc') {
+                    const dist = Math.sqrt((this.x - other.x)**2 + (this.y - other.y)**2);
+                    // Add push vector if too close
+                    if (dist < separationRadius && dist > 0.1) {
+                        const push = (separationRadius - dist) / separationRadius;
+                        sepX += (this.x - other.x) / dist * push * 2.5; 
+                        sepY += (this.y - other.y) / dist * push * 2.5;
+                    }
+                }
+            });
+        }
+
         if (this.target) {
             const tObj = this.target.obj;
-            // Handle case where target might be a simple object {x,y} for tiles
             const tx = tObj.x !== undefined ? tObj.x : (this.target.x * CONFIG.TILE_SIZE + 16);
             const ty = tObj.y !== undefined ? tObj.y : (this.target.y * CONFIG.TILE_SIZE + 16);
             
             const dist = Math.sqrt((tx - this.x)**2 + (ty - this.y)**2);
 
             // 2. Attack
-            // [FIXED] Reduced attack range from 40 to 28 (Touching distance)
             if (dist < 28) {
                 if (this.attackCooldown <= 0) {
                     this.performAttack(game, this.target);
@@ -89,16 +104,37 @@ export class Raider extends Entity {
             } 
             // 3. Move
             else {
-                const angle = Math.atan2(ty - this.y, tx - this.x);
-                this.move(Math.cos(angle) * this.speed, Math.sin(angle) * this.speed, world, game);
+                // Base direction to target
+                const dx = tx - this.x;
+                const dy = ty - this.y;
+                const angleToTarget = Math.atan2(dy, dx);
+                
+                let moveX = Math.cos(angleToTarget);
+                let moveY = Math.sin(angleToTarget);
+
+                // Add separation vector
+                moveX += sepX;
+                moveY += sepY;
+
+                // Normalize and move
+                const finalAngle = Math.atan2(moveY, moveX);
+                this.move(Math.cos(finalAngle) * this.speed, Math.sin(finalAngle) * this.speed, world, game);
             }
         } else {
             // Idle Wander
             if (Math.random() < 0.02) {
                 this.moveAngle = Math.random() * 6.28;
             }
-            if (this.moveAngle) {
-                this.move(Math.cos(this.moveAngle) * 0.5, Math.sin(this.moveAngle) * 0.5, world, game);
+            if (this.moveAngle !== undefined) {
+                let moveX = Math.cos(this.moveAngle);
+                let moveY = Math.sin(this.moveAngle);
+
+                // Apply separation to wander as well so they don't clump up while idle
+                moveX += sepX;
+                moveY += sepY;
+
+                const finalAngle = Math.atan2(moveY, moveX);
+                this.move(Math.cos(finalAngle) * 0.5, Math.sin(finalAngle) * 0.5, world, game);
             }
         }
     }
@@ -120,7 +156,6 @@ export class Raider extends Entity {
         });
 
         // B. Check Structures (If no player is extremely close)
-        // Scan a small radius around NPC for breakable walls/towers
         if (minDst > 100) { 
             const gx = Math.floor(this.x / CONFIG.TILE_SIZE);
             const gy = Math.floor(this.y / CONFIG.TILE_SIZE);
@@ -134,7 +169,6 @@ export class Raider extends Entity {
                         const d = Math.sqrt((x * 32 + 16 - this.x)**2 + (y * 32 + 16 - this.y)**2);
                         if (d < minDst) {
                             minDst = d;
-                            // For tiles, obj needs x/y or special handling. 
                             closest = { type: 'structure', obj: { x: x * 32 + 16, y: y * 32 + 16, hp: 1 }, x: x, y: y }; 
                         }
                     }
@@ -146,7 +180,6 @@ export class Raider extends Entity {
     }
 
     performAttack(game, target) {
-        // [MODIFIED] Added offset to particles so they appear "between" combatants
         game.spawnParticles(this.x + (Math.random()-0.5)*10, this.y + (Math.random()-0.5)*10, '#fff', 3);
         
         if (target.type === 'player') {
@@ -158,7 +191,6 @@ export class Raider extends Entity {
                 game.network.sendHit(p.id, 10);
             }
         } else if (target.type === 'structure') {
-            // Apply damage to tile
             game.applyDamageToTile(target.x, target.y, 15);
         }
     }
