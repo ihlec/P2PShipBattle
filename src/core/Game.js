@@ -706,7 +706,8 @@ export default class Game {
                 c.ammo--;
                 c.cooldown = 60; 
                 
-                const proj = new Projectile(c.x, c.y - 20, target.x, target.y, c.damage, 10, '#000', true, 'cannonball');
+                // [FIX] Pass c.key (grid coordinates) as ownerId to prevent self-damage
+                const proj = new Projectile(c.x, c.y - 20, target.x, target.y, c.damage, 10, '#000', true, 'cannonball', c.key);
                 this.projectiles.push(proj);
                 this.spawnParticles(c.x, c.y - 10, '#888', 3);
                 this.triggerShake(2); 
@@ -869,6 +870,12 @@ export default class Game {
 
             const gx = Math.floor(p.x / CONFIG.TILE_SIZE);
             const gy = Math.floor(p.y / CONFIG.TILE_SIZE);
+            
+            // [FIX] Prevent self-damage: 
+            // If the current tile coordinate matches the projectile's ownerId (which is "x,y" string), 
+            // ignore collision with this tile.
+            if (p.ownerId === `${gx},${gy}`) return;
+
             const tileId = this.world.getTile(gx, gy);
             const tileDef = ID_TO_TILE[tileId];
             
