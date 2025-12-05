@@ -1,3 +1,4 @@
+
 import { CONFIG, TILES, ID_TO_TILE } from '../config.js';
 import Utils from '../utils.js';
 import InputHandler from './InputHandler.js';
@@ -50,7 +51,7 @@ export default class Game {
 
         this.peaceTimer = 0;
         this.peaceThreshold = this.getNewPeaceThreshold();
-        this.peaceMsgTimer = null; // [NEW] Timer reference for clearing messages
+        this.peaceMsgTimer = null; 
 
         this.initializeGame(isHost, loadData);
         this.setupBindings();
@@ -533,6 +534,10 @@ export default class Game {
             else if (type === TILES.TOWER_BASE_STONE.id) { dropId = TILES.GREY.id; qty = 2; }
             else if (type === TILES.TOWER_BASE_IRON.id) { dropId = TILES.IRON.id; qty = 2; }
             else if (type === TILES.TOWER_BASE_GOLD.id) { dropId = TILES.GOLD.id; qty = 2; }
+            else if (type === TILES.STONE_BLOCK.id) { 
+                dropId = TILES.GREY.id; 
+                qty = 3; 
+            }
             else if (type === TILES.MOUNTAIN.id) { 
                 if (Math.random() < 0.2) {
                     dropId = TILES.IRON.id;
