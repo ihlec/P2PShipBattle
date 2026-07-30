@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Peer Pirates</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="importmap">
+    {
+      "imports": {
+        "trystero": "https://esm.sh/trystero@0.22.0"
+      }
+    }
+    </script>
+</head>
+<body>
+    <div id="main-menu" style="position:absolute; top:0; left:0; z-index:9999; width:100%; height:100%; background:#111; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#eee; font-family:monospace;">
+        <h1 class="menu-title">
+            <svg class="jolly-roger" viewBox="0 0 64 64" aria-hidden="true">
+                <g fill="#f0e6d2" stroke="#111" stroke-width="1.5" stroke-linejoin="round">
+                    <ellipse cx="32" cy="22" rx="14" ry="13"/>
+                    <rect x="26" y="32" width="12" height="8" rx="2"/>
+                    <circle cx="26" cy="20" r="3.5" fill="#111" stroke="none"/>
+                    <circle cx="38" cy="20" r="3.5" fill="#111" stroke="none"/>
+                    <path d="M28 28 Q32 31 36 28" fill="none" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+                    <rect x="28" y="36" width="2.5" height="5" fill="#111" stroke="none"/>
+                    <rect x="33.5" y="36" width="2.5" height="5" fill="#111" stroke="none"/>
+                    <g transform="translate(32 50) rotate(-35)">
+                        <rect x="-18" y="-2" width="36" height="4" rx="2"/>
+                        <circle cx="-18" cy="0" r="4"/>
+                        <circle cx="18" cy="0" r="4"/>
+                    </g>
+                    <g transform="translate(32 50) rotate(35)">
+                        <rect x="-18" y="-2" width="36" height="4" rx="2"/>
+                        <circle cx="-18" cy="0" r="4"/>
+                        <circle cx="18" cy="0" r="4"/>
+                    </g>
+                </g>
+            </svg>
+            <span>PEER PIRATES</span>
+            <svg class="jolly-roger" viewBox="0 0 64 64" aria-hidden="true">
+                <g fill="#f0e6d2" stroke="#111" stroke-width="1.5" stroke-linejoin="round">
+                    <ellipse cx="32" cy="22" rx="14" ry="13"/>
+                    <rect x="26" y="32" width="12" height="8" rx="2"/>
+                    <circle cx="26" cy="20" r="3.5" fill="#111" stroke="none"/>
+                    <circle cx="38" cy="20" r="3.5" fill="#111" stroke="none"/>
+                    <path d="M28 28 Q32 31 36 28" fill="none" stroke="#111" stroke-width="2" stroke-linecap="round"/>
+                    <rect x="28" y="36" width="2.5" height="5" fill="#111" stroke="none"/>
+                    <rect x="33.5" y="36" width="2.5" height="5" fill="#111" stroke="none"/>
+                    <g transform="translate(32 50) rotate(-35)">
+                        <rect x="-18" y="-2" width="36" height="4" rx="2"/>
+                        <circle cx="-18" cy="0" r="4"/>
+                        <circle cx="18" cy="0" r="4"/>
+                    </g>
+                    <g transform="translate(32 50) rotate(35)">
+                        <rect x="-18" y="-2" width="36" height="4" rx="2"/>
+                        <circle cx="-18" cy="0" r="4"/>
+                        <circle cx="18" cy="0" r="4"/>
+                    </g>
+                </g>
+            </svg>
+        </h1>
+        <div style="background:#222; padding:30px; border:2px solid #555; text-align:center; border-radius: 8px; box-shadow: 0 0 20px #000; width: 350px;">
+            <input id="name-input" type="text" placeholder="ENTER PLAYER NAME" maxlength="10" style="padding:10px; font-size:16px; text-align:center; background:#000; color:#0f0; border:1px solid #555; width: 100%; box-sizing: border-box; margin-bottom: 20px;">
+            <h3 style="margin-top:0; border-bottom:1px solid #444; padding-bottom:10px;">HOST GAME</h3>
+            <div style="display:flex; gap:10px;">
+                <button id="btn-host" class="ui-btn" style="flex:1; font-size:14px; padding:10px;">NEW WORLD</button>
+                <button id="btn-load-host" class="ui-btn" style="flex:1; font-size:14px; padding:10px; color:#ffd700;">LOAD</button>
+            </div>
+            <h3 style="margin-top:20px; border-bottom:1px solid #444; padding-bottom:10px;">JOIN GAME</h3>
+            <input id="room-input" type="text" placeholder="ENTER ROOM CODE" style="padding:10px; font-size:16px; text-transform:uppercase; text-align:center; background:#000; color:#fff; border:1px solid #555; width: 100%; box-sizing: border-box;">
+            <button id="btn-join" class="ui-btn" style="font-size:18px; padding:15px 30px; margin:10px 0 0 0; display:block; width:100%;">JOIN</button>
+        </div>
+        <div style="margin-top: 20px; color: #555;">P2P Mesh via Trystero</div>
+    </div>
+
+    <div id="ui-layer">
+        <div class="stat-box">
+            <div style="color:#ffd700; border-bottom:1px solid #555; margin-bottom:5px; padding-bottom:5px;">
+                Room: <span id="room-id-disp">---</span>
+            </div>
+            <div>Pos: <span id="coords">0, 0</span></div>
+        </div>
+        <div class="stat-box">
+            <small>WASD: Move | Click: Build/Attack | R-Click: Interact | P / Minimap: Ping</small>
+            <div id="active-bp-display" style="display:none;">
+                Build: <span id="current-bp-name"></span>
+            </div>
+            <div id="active-weapon-display" style="display:none; color:#ff4444;">
+                Equipped: <span id="current-weapon-name"></span>
+            </div>
+            <div style="margin-top:5px; padding-top:5px; border-top:1px solid #555;">
+                <button id="btn-save" class="ui-btn">SAVE</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="minimap-wrap">
+        <canvas id="minimap"></canvas>
+        <div id="minimap-hint">Click map or P to ping</div>
+    </div>
+
+    <div id="action-bar">
+        <button id="hammer-btn" title="Structures">🔨</button>
+        <button id="weapon-btn" title="Weapons">⚔️</button>
+    </div>
+
+    <div id="blueprint-menu" class="floating-menu"></div>
+    <div id="weapon-menu" class="floating-menu"></div>
+    <div id="inventory-bar"></div>
+    <div id="weapon-bar"></div>
+    
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="touch-controls">
+        <div id="joystick-base"></div>
+        <div id="joystick-thumb"></div>
+        <button id="btn-broadside-l" class="touch-broadside-btn broadside-left">◄</button>
+        <button id="btn-broadside-r" class="touch-broadside-btn broadside-right">►</button>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,517 @@
+import { joinRoom } from 'trystero';
+import { Entity } from '../entities/Entity.js';
+import { Sheep } from '../entities/Npc.js';
+import { Boat } from '../entities/Boat.js';
+import { Worker } from '../entities/Worker.js';
+import { Projectile } from '../entities/Projectile.js'; 
+import { CONFIG, TILES, ID_TO_TILE } from '../config.js'; 
+import Utils from '../utils.js';
+
+export default class Network {
+    constructor(game, roomId, isHost, playerName) {
+        this.game = game;
+        this.roomId = roomId;
+        this.isHost = isHost;
+        this.playerName = playerName;
+        
+        this.lastEntitySyncTime = 0;
+        this.lastPlayerSyncTime = 0; 
+        this.hostId = null; 
+        
+        const config = { 
+            appId: 'peer-pirates-v1',
+            trackerUrls: [
+                'wss://tracker.openwebtorrent.com',      
+                'wss://tracker.btorrent.xyz',            
+                'wss://tracker.webtorrent.dev',          
+                'wss://tracker.files.fm:7073/announce',  
+                'wss://qot.somnolescent.net',            
+                'wss://tracker.sigterm.xyz'              
+            ]
+        };
+        this.room = joinRoom(config, roomId);
+        
+        this.selfId = this.room.selfId;
+
+        const [sendInit, getInit] = this.room.makeAction('init');
+        const [sendWorld, getWorld] = this.room.makeAction('world');
+        const [sendPlayer, getPlayer] = this.room.makeAction('player');
+        const [sendTileReq, getTileReq] = this.room.makeAction('tileReq');
+        const [sendTileUpd, getTileUpd] = this.room.makeAction('tileUpd');
+        const [sendDamage, getDamage] = this.room.makeAction('damage');
+        const [sendEntities, getEntities] = this.room.makeAction('ents');
+        const [sendEntReq, getEntReq] = this.room.makeAction('entReq');
+        const [sendEntHit, getEntHit] = this.room.makeAction('entHit');
+        
+        const [sendShoot, getShoot] = this.room.makeAction('shoot');
+        const [sendCannon, getCannon] = this.room.makeAction('cannon');
+        const [sendKillFeed, getKillFeed] = this.room.makeAction('kill');
+        const [sendWorldReq, getWorldReq] = this.room.makeAction('worldReq');
+        const [sendPing, getPing] = this.room.makeAction('ping');
+
+        this.actions = { 
+            sendInit, sendWorld, sendPlayer, sendTileReq, sendTileUpd, 
+            sendDamage, sendEntities, sendEntReq, sendEntHit,
+            sendShoot, sendCannon, sendKillFeed, sendWorldReq, sendPing
+        };
+
+        this.worldReceived = this.isHost;
+        this._worldRequestStarted = false;
+
+        this.setupListeners(
+            getInit, getWorld, getPlayer, getTileReq, getTileUpd, 
+            getDamage, getEntities, getEntReq, getEntHit,
+            getShoot, getCannon, getKillFeed, getWorldReq, getPing
+        );
+
+        if (!this.isHost) {
+            this.requestWorldFromHost();
+        }
+    }
+
+    setupListeners(getInit, getWorld, getPlayer, getTileReq, getTileUpd, getDamage, getEntities, getEntReq, getEntHit, getShoot, getCannon, getKillFeed, getWorldReq, getPing) {
+        this.room.onPeerJoin(peerId => {
+            console.log(`Peer joined: ${peerId}`);
+            this.actions.sendInit({ name: this.playerName }, peerId);
+            if (this.isHost) {
+                setTimeout(() => this.broadcastWorldState(peerId), 500);
+                setTimeout(() => this.broadcastWorldState(peerId), 2000);
+            } else if (!this.worldReceived) {
+                this.requestWorldFromHost();
+            }
+        });
+
+        this.room.onPeerLeave(peerId => {
+            console.log(`Peer left: ${peerId}`);
+            delete this.game.peers[peerId];
+
+            if (!this.isHost && peerId === this.hostId) {
+                this.game.showMessage("CONNECTION LOST", "#f00");
+            }
+        });
+
+        getInit((data, peerId) => {
+            if (this.isHost) {
+                setTimeout(() => this.broadcastWorldState(peerId), 300);
+            }
+            if (!this.game.peers[peerId]) {
+                this.game.peers[peerId] = { 
+                    id: peerId, type: 'peer',
+                    name: data.name || "Unknown",
+                    x: 0, y: 0, targetX: 0, targetY: 0,
+                    hp: 100, maxHp: 100,
+                    activeMelee: 'hand', inBoat: false,
+                    isMoving: false, moveTime: 0, direction: {x:0, y:1}
+                };
+            } else if (data.name) {
+                this.game.peers[peerId].name = data.name;
+            }
+            if (!this.isHost && !this.worldReceived) {
+                this.requestWorldFromHost();
+            }
+        });
+
+        getWorld((data, peerId) => {
+            if (!this.isHost) {
+                console.log("Received World Data from", peerId, "seed=", data.seed);
+                this.hostId = peerId;
+                this.worldReceived = true;
+
+                this.game.world.importData({
+                    seed: data.seed,
+                    modifiedTiles: data.modified,
+                    tileData: data.tileData, 
+                    time: data.time
+                });
+                
+                const needsSpawn = this.game.player.x === 0 && this.game.player.y === 0;
+                if (needsSpawn && data.spawnX != null && data.spawnY != null) {
+                    const offsetX = (Math.random() - 0.5) * 128;
+                    const offsetY = (Math.random() - 0.5) * 128;
+                    this.game.player.x = data.spawnX + offsetX;
+                    this.game.player.y = data.spawnY + offsetY;
+                    this.game.spawnPoint = { x: data.spawnX, y: data.spawnY };
+                }
+                this.game.recalculateCannons();
+                this.game.showMessage("WORLD SYNCED", "#0f0", 2000);
+            }
+        });
+
+        getWorldReq((data, peerId) => {
+            if (this.isHost) {
+                console.log("World requested by", peerId);
+                this.broadcastWorldState(peerId);
+            }
+        });
+
+        getPlayer((data, peerId) => {
+            const peer = this.game.peers[peerId];
+            if (peer) {
+                peer.targetX = data.x; peer.targetY = data.y;
+                peer.activeMelee = data.w; peer.inBoat = data.b;
+                peer.hp = data.hp; peer.isMoving = data.mv;
+                if(data.mv) peer.moveTime += 16; 
+                if (peer.x === 0 && peer.y === 0) { peer.x = data.x; peer.y = data.y; }
+                if (data.bh !== undefined && peer.boatStats) {
+                    peer.boatStats.targetHeading = data.bh;
+                } else if (data.bh !== undefined) {
+                    peer.boatStats = { heading: data.bh, targetHeading: data.bh };
+                }
+                peer.subtype = data.st || 'sloop';
+            } else {
+                this.game.peers[peerId] = { 
+                    id: peerId, type: 'peer', name: "Player",
+                    x: data.x, y: data.y, targetX: data.x, targetY: data.y,
+                    hp: data.hp, maxHp: 100,
+                    activeMelee: data.w, inBoat: data.b,
+                    isMoving: data.mv, moveTime: 0, direction: {x:0, y:1},
+                    subtype: data.st || 'sloop'
+                };
+                if (data.bh !== undefined) {
+                    this.game.peers[peerId].boatStats = { heading: data.bh, targetHeading: data.bh };
+                }
+            }
+        });
+
+        getTileUpd((data, peerId) => {
+            if (this.isHost) return;
+            if (this.hostId && peerId !== this.hostId) return;
+
+            if (data.action === 'set') {
+                this.game.world.setTile(data.x, data.y, data.id);
+                this.game.spawnParticles(data.x * 32 + 16, data.y * 32 + 16, '#fff', 5);
+                this.game.recalculateCannons();
+            } else if (data.action === 'hit') { 
+                this.game.world.hitTile(data.x, data.y, data.id); 
+                const tx = data.x * CONFIG.TILE_SIZE + 16;
+                const ty = data.y * CONFIG.TILE_SIZE + 16;
+                this.game.spawnParticles(tx, ty, '#777', 3);
+            }
+        });
+
+        getEntities((data) => {
+            if (!this.isHost) {
+                this.syncList(data.n, this.game.npcs, 'npc');
+                this.syncList(data.a, this.game.animals, 'sheep');
+                this.syncList(data.b, this.game.boats, 'boat');
+                this.syncList(data.w, this.game.workers, 'worker');
+                this.syncLoot(data.l);
+                
+                if (data.t !== undefined) {
+                    this.game.world.time = data.t;
+                }
+            }
+        });
+
+        getTileReq((data, peerId) => {
+            if (this.isHost) {
+                if (data.type === 'build') {
+                    const gx = data.x;
+                    const gy = data.y;
+                    const id = data.id;
+                    const current = this.game.world.getTile(gx, gy);
+
+                    const baseTerrains = [TILES.GRASS.id, TILES.SAND.id, TILES.WATER.id, TILES.DEEP_WATER.id];
+                    if (!baseTerrains.includes(current) && current !== id) return;
+
+                    const isWater = (current === TILES.WATER.id || current === TILES.DEEP_WATER.id);
+                    if (isWater) {
+                        const allowedOnWater = [TILES.GREY.id, TILES.WOOD_RAIL.id];
+                        if (!allowedOnWater.includes(id)) return;
+                    }
+                    
+                    if (ID_TO_TILE[id].solid && this.game.isTileOccupied(gx, gy)) return;
+
+                    this.game.world.setTile(gx, gy, id);
+                    this.actions.sendTileUpd({ x: gx, y: gy, id: id, action: 'set' });
+                    if (id === TILES.CROP_SEED.id) {
+                        this.game.crops.push({ x: gx, y: gy, timer: 0 });
+                    }
+                    this.game.recalculateCannons();
+
+                } else if (data.type === 'damage') {
+                    this.game.applyDamageToTile(data.x, data.y, data.dmg);
+                } else if (data.type === 'remove') {
+                    this.requestRemove(data.x, data.y, data.id);
+                }
+            }
+        });
+
+        getEntReq((data, peerId) => {
+            if (this.isHost) {
+                if (data.act === 'spawnBoat') {
+                    const subtype = data.type || 'sloop';
+                    const b = new Boat(data.x, data.y, 'player', subtype);
+                    if (data.hp != null) b.hp = data.hp;
+                    b.hullLevel = data.hull || 0;
+                    b.sailLevel = data.sail || 0;
+                    b.cannonLevel = data.cannon || 0;
+                    if (b.applyUpgrades) b.applyUpgrades();
+                    this.game.boats.push(b);
+                } else if (data.act === 'enterBoat') {
+                    const idx = this.game.boats.findIndex(b => b.id === data.id);
+                    if (idx !== -1) this.game.boats.splice(idx, 1);
+                } else if (data.act === 'shear') {
+                    const s = this.game.animals.find(a => a.id === data.id);
+                    if (s && s.hasWool) {
+                        s.hasWool = false; 
+                        s.woolTimer = CONFIG.WOOL_REGROW_TIME;
+                        this.game.spawnLoot(s.x, s.y, 'sheep');
+                    }
+                } else if (data.act === 'refill') {
+                    const c = this.game.cannons.find(can => can.key === data.id);
+                    if (c) {
+                        c.ammo += 5;
+                        this.game.spawnText(c.x, c.y, "+5 AMMO", "#00ffff");
+                        this.actions.sendCannon({ key: c.key, act: 'upd', ammo: c.ammo });
+                    }
+                } else if (data.act === 'pickup') {
+                    const lIdx = this.game.loot.findIndex(l => l.uid === data.id);
+                    if (lIdx !== -1) {
+                         this.game.loot.splice(lIdx, 1);
+                    }
+                } else if (data.act === 'upgradeBoat') {
+                    const boat = this.game.boats.find(b => b.id === data.id);
+                    if (boat && boat.owner === 'player') {
+                        if (data.type === 'repair') boat.hp = Math.min(boat.hp + CONFIG.REPAIR.AMOUNT, boat.maxHp);
+                        else if (data.type === 'hull' && (boat.hullLevel || 0) < 4) boat.hullLevel = (boat.hullLevel || 0) + 1;
+                        else if (data.type === 'sail' && (boat.sailLevel || 0) < 4) boat.sailLevel = (boat.sailLevel || 0) + 1;
+                        else if (data.type === 'cannon' && (boat.cannonLevel || 0) < 4) boat.cannonLevel = (boat.cannonLevel || 0) + 1;
+                        if (boat.applyUpgrades) boat.applyUpgrades();
+                    }
+                } else if (data.act === 'spawnWorker') {
+                    this.game.workers.push(new Worker(data.x, data.y));
+                } else if (data.act === 'workerTarget') {
+                    const w = this.game.workers.find(wk => wk.id === data.wid);
+                    if (w) {
+                        if (data.ttype === 'tile') {
+                            w.assignTarget({ type: 'tile', gx: data.gx, gy: data.gy }, this.game);
+                        } else if (data.ttype === 'sheep') {
+                            w.assignTarget({ type: 'sheep', id: data.tid }, this.game);
+                        }
+                    }
+                } else if (data.act === 'harvestCrop') {
+                    const tileId = this.game.world.getTile(data.x, data.y);
+                    if (tileId === TILES.CROP_READY.id) {
+                        const biome = Utils.getBiome(data.x, data.y, this.game.world.seed);
+                        const restoreId = biome === TILES.SAND.id ? TILES.SAND.id : TILES.GRASS.id;
+                        this.game.world.setTile(data.x, data.y, restoreId);
+                        this.actions.sendTileUpd({ x: data.x, y: data.y, id: restoreId, action: 'set' });
+                        this.game.crops = this.game.crops.filter(c => c.x !== data.x || c.y !== data.y);
+                    }
+                }
+            }
+        });
+
+        getDamage((dmg) => {
+             if (this.game.player && !this.game.godMode) {
+                 this.game.player.hp -= dmg;
+                 this.game.spawnParticles(this.game.player.x, this.game.player.y, '#f00', 5);
+                 this.game.spawnText(this.game.player.x, this.game.player.y, `-${dmg}`, "#f00");
+             }
+        });
+        
+        getEntHit((data) => {
+            if (this.isHost) {
+                if (data.id === this.selfId || this.game.peers[data.id]) return;
+
+                const target = [...this.game.npcs, ...this.game.animals, ...this.game.boats, ...this.game.workers].find(e => e.id === data.id);
+                if (target) {
+                    target.hp -= data.dmg;
+                    this.game.spawnParticles(target.x, target.y, '#f00', 5);
+                }
+            }
+        });
+
+        getShoot((data, peerId) => {
+            if (peerId === this.selfId) return;
+
+            const p = new Projectile(data.x, data.y, data.tx, data.ty, data.dmg, data.spd, data.col, true, data.type, peerId);
+            p.life = data.life;
+            this.game.projectiles.push(p);
+        });
+
+        getCannon((data, peerId) => {
+            if (this.isHost) return;
+
+            const cannon = this.game.cannons.find(c => c.key === data.key);
+            if (!cannon) return;
+
+            if (data.act === 'shoot') {
+                cannon.ammo = data.ammo;
+                cannon.cooldown = 60; 
+                if (data.tx && data.ty) {
+                    const proj = new Projectile(cannon.x, cannon.y - 20, data.tx, data.ty, cannon.damage, 10, '#000', true, 'cannonball', data.key);
+                    this.game.projectiles.push(proj);
+                    this.game.spawnParticles(cannon.x, cannon.y - 10, '#888', 3);
+                }
+            } else if (data.act === 'upd') {
+                cannon.ammo = data.ammo;
+                if(data.cd) cannon.cooldown = data.cd;
+                this.game.spawnText(cannon.x, cannon.y, "+5 AMMO", "#00ffff");
+            }
+        });
+
+        getKillFeed((data) => {
+            this.game.showMessage(`${data.name} was eliminated!`, "#ff4444", 3000);
+        });
+
+        getPing((data, peerId) => {
+            if (peerId === this.selfId) return;
+            if (!data || data.x == null || data.y == null) return;
+            this.game.placePing(data.x, data.y, true, data.name || 'Player');
+        });
+    }
+
+    requestWorldFromHost() {
+        if (this.worldReceived || this.isHost || this._worldRequestStarted) return;
+        this._worldRequestStarted = true;
+        let attempt = 0;
+        const maxAttempts = 8;
+        const tryRequest = () => {
+            if (this.worldReceived || attempt >= maxAttempts) return;
+            attempt++;
+            console.log(`Requesting world state (attempt ${attempt})`);
+            this.actions.sendWorldReq({});
+            setTimeout(tryRequest, 1000 * Math.min(attempt, 3));
+        };
+        setTimeout(tryRequest, 800);
+    }
+
+    broadcastWorldState(targetPeerId = null) {
+        if (!this.game.world) return;
+        const payload = {
+            seed: this.game.world.seed,
+            modified: this.game.world.modifiedTiles,
+            tileData: this.game.world.tileData, 
+            time: this.game.world.time,
+            spawnX: Math.floor(this.game.spawnPoint.x),
+            spawnY: Math.floor(this.game.spawnPoint.y)
+        };
+        this.actions.sendWorld(payload, targetPeerId);
+    }
+
+    syncList(sourceList, targetArray, type) {
+        if (!sourceList) return;
+        sourceList.forEach(s => {
+            let t = targetArray.find(e => e.id === s.i);
+            if (!t) {
+                if (type === 'npc') { t = new Entity(s.x, s.y, 'npc'); t.id = s.i; t.npcType = s.nt || 'raider'; targetArray.push(t); }
+                else if (type === 'sheep') { t = new Sheep(s.x, s.y); t.id = s.i; targetArray.push(t); }
+                else if (type === 'boat') { t = new Boat(s.x, s.y, s.o, s.st || 'sloop'); t.id = s.i; t.hullLevel = s.hu || 0; t.sailLevel = s.sa || 0; t.cannonLevel = s.ca || 0; targetArray.push(t); }
+                else if (type === 'worker') { t = new Worker(s.x, s.y); t.id = s.i; targetArray.push(t); }
+            }
+            if (t) {
+                t.targetX = s.x; t.targetY = s.y; t.hp = s.h;
+                if (s.nt) t.npcType = s.nt;
+                if (s.f !== undefined) t.fed = s.f;
+                if (s.w !== undefined && type === 'sheep') t.hasWool = s.w;
+                if (s.s !== undefined && type === 'worker') t.state = s.s;
+                if (s.bs && t.boatStats) {
+                    t.boatStats.targetHeading = s.bs.h;
+                    t.boatStats.heading = s.bs.h; 
+                }
+                if (s.st) t.subtype = s.st;
+                if (s.hu !== undefined) t.hullLevel = s.hu;
+                if (s.sa !== undefined) t.sailLevel = s.sa;
+                if (s.ca !== undefined) t.cannonLevel = s.ca;
+            }
+        });
+        for (let i = targetArray.length - 1; i >= 0; i--) {
+            if (!sourceList.find(s => s.i === targetArray[i].id)) {
+                targetArray.splice(i, 1);
+            }
+        }
+    }
+
+    syncLoot(sourceList) {
+        if (!sourceList) return;
+        const targetArray = this.game.loot;
+        sourceList.forEach(s => {
+            let t = targetArray.find(e => e.uid === s.i);
+            if (!t) {
+                t = { uid: s.i, x: s.x, y: s.y, id: s.t, qty: s.q, bob: Math.random() * 100 };
+                targetArray.push(t);
+            } else {
+                t.x = s.x; t.y = s.y;
+            }
+        });
+        for (let i = targetArray.length - 1; i >= 0; i--) {
+            if (!sourceList.find(s => s.i === targetArray[i].uid)) {
+                targetArray.splice(i, 1);
+            }
+        }
+    }
+
+    update(deltaTime) {
+        const now = Date.now();
+
+        if (!this.isHost && !this.worldReceived) return;
+        
+        if (now - this.lastPlayerSyncTime > 50) { 
+            this.lastPlayerSyncTime = now;
+            this.actions.sendPlayer({
+                x: Math.floor(this.game.player.x),
+                y: Math.floor(this.game.player.y),
+                w: this.game.player.activeMelee,
+                b: this.game.player.inBoat,
+                hp: Math.floor(this.game.player.hp),
+                mv: this.game.player.isMoving,
+                bh: this.game.player.inBoat ? Number(this.game.player.boatStats.heading.toFixed(2)) : 0,
+                st: this.game.player.subtype || 'sloop'
+            });
+        }
+        
+        if (this.isHost) {
+             if (now - this.lastEntitySyncTime > 50) { 
+                 this.lastEntitySyncTime = now;
+                 const n = this.game.npcs.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, nt: e.npcType }));
+                 const a = this.game.animals.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, f: e.fed?1:0, w: e.hasWool?1:0 }));
+                 const b = this.game.boats.map(e => ({ 
+                     i: e.id, 
+                     x: Number(e.x.toFixed(1)), 
+                     y: Number(e.y.toFixed(1)), 
+                     h: e.hp, 
+                     o: e.owner, 
+                     st: e.subtype,
+                     bs: { h: Number(e.boatStats.heading.toFixed(2)) },
+                     hu: e.hullLevel || 0, sa: e.sailLevel || 0, ca: e.cannonLevel || 0
+                 }));
+                 const l = this.game.loot.map(e => ({ i: e.uid, x: Math.floor(e.x), y: Math.floor(e.y), t: e.id, q: e.qty }));
+                 const w = this.game.workers.map(e => ({ i: e.id, x: Number(e.x.toFixed(1)), y: Number(e.y.toFixed(1)), h: e.hp, s: e.state }));
+                 
+                 this.actions.sendEntities({ n, a, b, l, w, t: Number(this.game.world.time.toFixed(4)) });
+             }
+        }
+    }
+    
+    requestBuild(gridX, gridY, id) {
+        if (this.isHost) this.actions.sendTileUpd({ x: gridX, y: gridY, id: id, action: 'set' });
+        else this.actions.sendTileReq({ x: gridX, y: gridY, id: id, type: 'build' });
+    }
+
+    requestRemove(gridX, gridY, restoreId) {
+        if (this.isHost) {
+            this.game.spawnLoot(gridX * CONFIG.TILE_SIZE + 16, gridY * CONFIG.TILE_SIZE + 16, this.game.world.getTile(gridX, gridY));
+            this.game.world.setTile(gridX, gridY, restoreId);
+            this.actions.sendTileUpd({ x: gridX, y: gridY, id: restoreId, action: 'set' });
+            this.game.recalculateCannons();
+        } else {
+            this.actions.sendTileReq({ x: gridX, y: gridY, id: restoreId, type: 'remove' });
+        }
+    }
+
+    broadcastTileHit(gridX, gridY, damage) {
+        if (this.isHost) {
+            this.actions.sendTileUpd({ x: gridX, y: gridY, id: damage, action: 'hit' });
+        }
+    }
+
+    broadcastBuild(gridX, gridY, id) {
+        if (this.isHost) this.actions.sendTileUpd({ x: gridX, y: gridY, id: id, action: 'set' });
+    }
+
+    sendHit(peerId, damage) {
+        this.actions.sendDamage(damage, peerId);
+    }
+}
